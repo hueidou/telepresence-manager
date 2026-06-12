@@ -13,6 +13,13 @@ A Windows desktop GUI tool for managing [Telepresence](https://www.telepresence.
 - 📦 Install / upgrade Traffic Manager
 - 💻 Open command prompt with selected context
 - 🔧 Auto-detect telepresence & kubectl installation, show version and path
+- 🔎 Search & filter contexts by name, cluster, server, or source file
+- 🔄 Auto-refresh connection status every 30 seconds
+- 🔔 Toast notifications for all operations
+- ⚠️ Disconnect confirmation dialog to prevent accidental interruption
+- 📋 Copy context name to clipboard
+- ⌨️ Keyboard shortcuts (`Ctrl+R` scan, `Esc` close, `Ctrl+F` search)
+- 🆕 Auto-check for updates on startup, one-click update with auto-restart
 
 ## Screenshot
 
@@ -70,7 +77,8 @@ telepresence-manager/
 │   ├── __init__.py
 │   ├── api.py                   # pywebview JS API bridge
 │   ├── kubeconfig.py            # Kubeconfig discovery & parsing
-│   └── telepresence.py          # Telepresence / kubectl CLI wrappers
+│   ├── telepresence.py          # Telepresence / kubectl CLI wrappers
+│   └── updater.py               # Version check & auto-update
 ├── web/                         # Frontend UI
 │   ├── index.html               # Page structure
 │   ├── style.css                # Dark theme styles
@@ -90,13 +98,15 @@ Edge WebView2 window (web/)
     ↕  pywebview JS API bridge
 Python backend (app/api.py)
     ├─ kubeconfig.py    Scans ~/.kube/, parses YAML configs
-    └─ telepresence.py  Wraps telepresence / kubectl subprocess calls
+    ├─ telepresence.py  Wraps telepresence / kubectl subprocess calls
+    └─ updater.py       Checks GitHub Releases for updates
 ```
 
 - Backend calls `telepresence` and `kubectl` CLI via `subprocess`
 - All long-running operations execute in background threads
 - Tool paths are auto-searched, not dependent on PATH environment variable
 - Supports multi-document YAML, .txt files, and other config formats
+- Auto-update downloads new exe and restarts via batch script
 
 ## Supported Config Formats
 
