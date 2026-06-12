@@ -45,7 +45,7 @@ body {
     align-items: center;
     justify-content: space-between;
     padding: 16px 24px;
-    background: var(--bg-card);
+    background: var(--bg);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
 }
@@ -442,7 +442,7 @@ body {
 /* === Footer === */
 .footer {
     padding: 8px 24px;
-    background: var(--bg-card);
+    background: var(--bg);
     border-top: 1px solid var(--border);
     font-size: 12px;
     color: var(--text-dim);
