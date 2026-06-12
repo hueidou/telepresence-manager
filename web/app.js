@@ -8,6 +8,9 @@ let api = null;
 
 // State
 let contexts = [];
+let expandedStatus = new Set(); // Track which cards have status panel open
+let autoRefreshTimer = null;
+const AUTO_REFRESH_INTERVAL = 30000; // 30s
 
 // === Initialization ===
 
@@ -15,7 +18,82 @@ window.addEventListener('pywebviewready', () => {
     api = window.pywebview.api;
     checkTools();
     scanConfigs();
+    setupKeyboardShortcuts();
 });
+
+// === Keyboard Shortcuts ===
+
+function setupKeyboardShortcuts() {
+    document.addEventListener('keydown', (e) => {
+        // Ctrl+R or F5: scan configs
+        if ((e.ctrlKey && e.key === 'r') || e.key === 'F5') {
+            e.preventDefault();
+            scanConfigs();
+        }
+        // Escape: close panels
+        if (e.key === 'Escape') {
+            closeToolDetailPanel();
+            closeConfirmDialog();
+        }
+        // Ctrl+F: focus search
+        if (e.ctrlKey && e.key === 'f') {
+            e.preventDefault();
+            const input = document.getElementById('searchInput');
+            if (input) input.focus();
+        }
+    });
+}
+
+// === Toast Notifications ===
+
+function showToast(message, type = 'info', duration = 3000) {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.classList.add('fadeOut');
+        setTimeout(() => toast.remove(), 300);
+    }, duration);
+}
+
+// === Confirm Dialog ===
+
+function showConfirm(title, message) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-overlay';
+        overlay.innerHTML = `
+            <div class="confirm-dialog">
+                <h3>${escapeHtml(title)}</h3>
+                <p>${escapeHtml(message)}</p>
+                <div class="confirm-actions">
+                    <button class="btn btn-sm" id="confirmCancel">取消</button>
+                    <button class="btn btn-sm btn-danger" id="confirmOk">确认</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        const cleanup = (result) => {
+            overlay.remove();
+            resolve(result);
+        };
+
+        overlay.querySelector('#confirmCancel').onclick = () => cleanup(false);
+        overlay.querySelector('#confirmOk').onclick = () => cleanup(true);
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) cleanup(false);
+        });
+    });
+}
+
+function closeConfirmDialog() {
+    const overlay = document.querySelector('.confirm-overlay');
+    if (overlay) overlay.remove();
+}
 
 // === Tool Check ===
 
@@ -37,10 +115,12 @@ async function checkTools() {
             if (!res.kubectl) missing.push('kubectl');
             el.textContent = `✗ 缺少: ${missing.join(', ')}`;
             el.className = 'tools-status error';
+            showToast(`缺少工具: ${missing.join(', ')}`, 'error', 5000);
         }
     } catch (e) {
         el.textContent = '✗ 检测失败';
         el.className = 'tools-status error';
+        showToast('工具检测失败', 'error');
     }
 }
 
@@ -107,6 +187,11 @@ function _closeToolDetail(e) {
     }
 }
 
+function closeToolDetailPanel() {
+    const panel = document.getElementById('toolDetailPanel');
+    if (panel) panel.remove();
+}
+
 // === Scan Configs ===
 
 async function scanConfigs() {
@@ -120,11 +205,106 @@ async function scanConfigs() {
         contexts = res.contexts || [];
         renderList();
         setFooter(`扫描完成，发现 ${contexts.length} 个 context`);
+
+        // Check existing connections on startup / re-scan
+        checkExistingConnections();
     } catch (e) {
         setFooter('扫描失败: ' + e.message);
+        showToast('扫描配置失败', 'error');
     } finally {
         btn.disabled = false;
         btn.innerHTML = '⟳ 扫描配置';
+    }
+}
+
+// === Search / Filter ===
+
+function filterContexts() {
+    const query = document.getElementById('searchInput').value.toLowerCase().trim();
+    const cards = document.querySelectorAll('.context-card');
+    let visibleCount = 0;
+
+    cards.forEach(card => {
+        const name = (card.dataset.ctxName || '').toLowerCase();
+        const cluster = (card.dataset.ctxCluster || '').toLowerCase();
+        const server = (card.dataset.ctxServer || '').toLowerCase();
+        const source = (card.dataset.ctxSource || '').toLowerCase();
+
+        const match = !query || name.includes(query) || cluster.includes(query) || server.includes(query) || source.includes(query);
+        card.classList.toggle('hidden', !match);
+        if (match) visibleCount++;
+    });
+
+    // Show/hide empty state
+    const container = document.getElementById('configList');
+    let noResult = container.querySelector('.no-result');
+    if (query && visibleCount === 0) {
+        if (!noResult) {
+            noResult = document.createElement('div');
+            noResult.className = 'empty-state no-result';
+            noResult.innerHTML = '<p>没有匹配的 context</p>';
+            container.appendChild(noResult);
+        }
+    } else if (noResult) {
+        noResult.remove();
+    }
+}
+
+// === Auto Refresh ===
+
+function startAutoRefresh() {
+    if (autoRefreshTimer) return;
+    autoRefreshTimer = setInterval(async () => {
+        if (contexts.length === 0) return;
+        try {
+            // Check telepresence status silently
+            const status = await api.get_status();
+            updateConnectionDots(status);
+        } catch (e) {
+            // Silent fail for auto-refresh
+        }
+    }, AUTO_REFRESH_INTERVAL);
+}
+
+function stopAutoRefresh() {
+    if (autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+    }
+}
+
+function updateConnectionDots(tpStatus) {
+    if (!tpStatus) return;
+    const isConnected = tpStatus.connected;
+
+    // Update all cards based on global telepresence status
+    contexts.forEach((ctx, idx) => {
+        const dot = document.getElementById(`dot-${idx}`);
+        const btn = document.getElementById(`btn-conn-${idx}`);
+        if (!dot || !btn) return;
+
+        if (isConnected) {
+            dot.className = 'dot connected';
+            btn.innerHTML = '■ 断开';
+            btn.className = 'btn btn-danger btn-sm';
+        } else {
+            dot.className = 'dot';
+            btn.innerHTML = '▶ 连接';
+            btn.className = 'btn btn-success btn-sm';
+        }
+    });
+}
+
+async function checkExistingConnections() {
+    try {
+        const status = await api.get_status();
+        if (status.connected) {
+            updateConnectionDots(status);
+            showToast('检测到已有 Telepresence 连接', 'info');
+        }
+        startAutoRefresh();
+    } catch (e) {
+        // Silent fail
     }
 }
 
@@ -136,20 +316,18 @@ function renderList() {
     if (contexts.length === 0) {
         container.innerHTML = '';
         container.appendChild(createEmptyState());
+        stopAutoRefresh();
         return;
     }
 
-    // Reconcile: reuse existing cards where possible, only update changed data
+    // Reconcile: reuse existing cards where possible
     const existingCards = container.querySelectorAll('.context-card');
-
-    // Build a key→index map from existing cards
     const existingMap = new Map();
     existingCards.forEach(card => {
         const name = card.dataset.ctxName;
         if (name) existingMap.set(name, card);
     });
 
-    // Track which context names are in the new list
     const newNames = new Set(contexts.map(c => c.name));
 
     // Remove cards that no longer exist
@@ -168,15 +346,12 @@ function renderList() {
     contexts.forEach((ctx, idx) => {
         const existing = existingMap.get(ctx.name);
         if (existing) {
-            // Update existing card data attributes and content
             _updateCardData(existing, ctx, idx);
-            // Ensure correct order
             if (prevSibling && existing.previousElementSibling !== prevSibling) {
                 prevSibling.after(existing);
             }
             prevSibling = existing;
         } else {
-            // Create new card
             const card = createContextCard(ctx, idx);
             if (prevSibling) {
                 prevSibling.after(card);
@@ -186,11 +361,26 @@ function renderList() {
             prevSibling = card;
         }
     });
+
+    // Restore expanded status panels
+    expandedStatus.forEach(name => {
+        const idx = contexts.findIndex(c => c.name === name);
+        if (idx >= 0) {
+            const statusEl = document.getElementById(`status-${idx}`);
+            if (statusEl) {
+                statusEl.classList.remove('hidden');
+                refreshStatus(idx, true); // silent refresh
+            }
+        }
+    });
 }
 
 function _updateCardData(card, ctx, idx) {
     card.id = `card-${idx}`;
     card.dataset.ctxName = ctx.name;
+    card.dataset.ctxCluster = ctx.cluster;
+    card.dataset.ctxServer = ctx.server || '';
+    card.dataset.ctxSource = ctx.source_file;
 
     // Update badge
     const badge = card.querySelector('.card-badge');
@@ -212,7 +402,9 @@ function _updateCardData(card, ctx, idx) {
 
     // Update meta
     const metaSpans = card.querySelectorAll('.card-meta span');
-    if (metaSpans[0]) metaSpans[0].textContent = `🌐 ${ctx.server || 'N/A'}`;
+    if (metaSpans[0]) {
+        metaSpans[0].innerHTML = `🌐 <span class="url-text">${escapeHtml(ctx.server || 'N/A')}</span>`;
+    }
     if (metaSpans[1]) metaSpans[1].textContent = `📁 ${shortenPath(ctx.source_file)}`;
 
     // Update button handlers with new index
@@ -230,6 +422,10 @@ function _updateCardData(card, ctx, idx) {
     if (shellBtn) {
         shellBtn.setAttribute('onclick', `openShell(${idx})`);
     }
+    const copyBtn = card.querySelector('.card-actions .btn-icon');
+    if (copyBtn) {
+        copyBtn.setAttribute('onclick', `copyContextName(${idx})`);
+    }
 
     // Update status panel id
     const statusEl = card.querySelector('.card-status');
@@ -243,7 +439,15 @@ function _updateCardData(card, ctx, idx) {
 function createEmptyState() {
     const div = document.createElement('div');
     div.className = 'empty-state';
-    div.innerHTML = '<p>未找到 K8s 配置，请确认 ~/.kube/ 下存在 config 文件</p>';
+    div.innerHTML = `
+        <p>未找到 K8s 配置</p>
+        <div class="hint">
+            请确认 <code>~/.kube/</code> 目录下存在配置文件：<br>
+            <code>config</code>、<code>*.yaml</code>、<code>*.yml</code>、<code>*.txt</code><br><br>
+            或通过以下命令生成：<br>
+            <code>kubectl config view --flatten > ~/.kube/config</code>
+        </div>
+    `;
     return div;
 }
 
@@ -252,6 +456,9 @@ function createContextCard(ctx, idx) {
     card.className = 'context-card';
     card.id = `card-${idx}`;
     card.dataset.ctxName = ctx.name;
+    card.dataset.ctxCluster = ctx.cluster;
+    card.dataset.ctxServer = ctx.server || '';
+    card.dataset.ctxSource = ctx.source_file;
 
     const currentBadge = ctx.is_current
         ? '<span class="card-badge card-current-badge" style="color:var(--accent)">当前</span>'
@@ -267,7 +474,7 @@ function createContextCard(ctx, idx) {
             <span class="card-badge">${escapeHtml(ctx.cluster)}</span>
         </div>
         <div class="card-meta">
-            <span>🌐 ${escapeHtml(ctx.server || 'N/A')}</span>
+            <span>🌐 <span class="url-text">${escapeHtml(ctx.server || 'N/A')}</span></span>
             <span>📁 ${escapeHtml(shortenPath(ctx.source_file))}</span>
         </div>
         <div class="card-actions">
@@ -280,10 +487,36 @@ function createContextCard(ctx, idx) {
             <button class="btn btn-sm" id="btn-status-${idx}" onclick="refreshStatus(${idx})">
                 ⟳ 状态
             </button>
+            <button class="btn-icon" onclick="copyContextName(${idx})" title="复制 context 名称">📋</button>
         </div>
         <div class="card-status hidden" id="status-${idx}"></div>
     `;
     return card;
+}
+
+// === Copy ===
+
+async function copyContextName(idx) {
+    const ctx = contexts[idx];
+    try {
+        await navigator.clipboard.writeText(ctx.name);
+        showToast(`已复制: ${ctx.name}`, 'success', 2000);
+    } catch (e) {
+        // Fallback
+        const textarea = document.createElement('textarea');
+        textarea.value = ctx.name;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        textarea.remove();
+        showToast(`已复制: ${ctx.name}`, 'success', 2000);
+    }
+}
+
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        showToast(`已复制`, 'success', 2000);
+    }).catch(() => {});
 }
 
 // === Connect / Disconnect ===
@@ -295,11 +528,20 @@ async function toggleConnect(idx) {
 
     const isCurrentlyConnected = dot.classList.contains('connected');
 
+    // Confirm disconnect
+    if (isCurrentlyConnected) {
+        const confirmed = await showConfirm(
+            '断开连接',
+            `确认断开 Telepresence 连接？当前连接的 context 可能正在使用中。`
+        );
+        if (!confirmed) return;
+    }
+
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span>';
 
     if (isCurrentlyConnected) {
-        setFooter(`正在断开 telepresence...`);
+        setFooter('正在断开 telepresence...');
         dot.className = 'dot';
         try {
             const res = await api.disconnect();
@@ -307,11 +549,16 @@ async function toggleConnect(idx) {
                 btn.innerHTML = '▶ 连接';
                 btn.className = 'btn btn-success btn-sm';
                 setFooter('已断开连接');
+                showToast('已断开 Telepresence 连接', 'success');
             } else {
+                dot.className = 'dot connected';
                 setFooter('断开失败: ' + res.message);
+                showToast('断开失败: ' + res.message, 'error');
             }
         } catch (e) {
+            dot.className = 'dot connected';
             setFooter('断开失败: ' + e.message);
+            showToast('断开失败', 'error');
         }
     } else {
         setFooter(`正在连接 ${ctx.name}...`);
@@ -323,15 +570,18 @@ async function toggleConnect(idx) {
                 btn.innerHTML = '■ 断开';
                 btn.className = 'btn btn-danger btn-sm';
                 setFooter(`已连接到 ${ctx.name}`);
+                showToast(`已连接到 ${ctx.name}`, 'success');
             } else {
                 dot.className = 'dot';
                 btn.innerHTML = '▶ 连接';
                 setFooter('连接失败: ' + res.message);
+                showToast('连接失败: ' + res.message, 'error');
             }
         } catch (e) {
             dot.className = 'dot';
             btn.innerHTML = '▶ 连接';
             setFooter('连接失败: ' + e.message);
+            showToast('连接失败', 'error');
         }
     }
 
@@ -347,41 +597,54 @@ async function openShell(idx) {
         const res = await api.open_shell(ctx.name, ctx.source_file);
         if (res.success) {
             setFooter(`已打开命令行 (${ctx.name})`);
+            showToast(`已打开命令行: ${ctx.name}`, 'success', 2000);
         } else {
             setFooter('打开失败: ' + res.message);
+            showToast('打开命令行失败: ' + res.message, 'error');
         }
     } catch (e) {
         setFooter('打开失败: ' + e.message);
+        showToast('打开命令行失败', 'error');
     }
 }
 
 // === Status ===
 
-async function refreshStatus(idx) {
+async function refreshStatus(idx, silent = false) {
     const ctx = contexts[idx];
     const statusEl = document.getElementById(`status-${idx}`);
     const btn = document.getElementById(`btn-status-${idx}`);
 
-    // Toggle: if already visible, hide it
-    if (!statusEl.classList.contains('hidden')) {
+    // Toggle: if already visible and not silent refresh, hide it
+    if (!silent && !statusEl.classList.contains('hidden')) {
         statusEl.classList.add('hidden');
         statusEl.innerHTML = '';
         btn.innerHTML = '⟳ 状态';
+        expandedStatus.delete(ctx.name);
         return;
     }
 
+    // Mark as expanded
+    expandedStatus.add(ctx.name);
     statusEl.classList.remove('hidden');
-    statusEl.innerHTML = '<span class="spinner"></span> 查询中...';
-    btn.innerHTML = '✕ 收起';
-    setFooter(`正在查询 ${ctx.name} 状态...`);
+    if (!silent) {
+        statusEl.innerHTML = '<span class="spinner"></span> 查询中...';
+        btn.innerHTML = '✕ 收起';
+        setFooter(`正在查询 ${ctx.name} 状态...`);
+    }
 
     try {
         const res = await api.get_full_status(ctx.name, ctx.source_file);
         renderStatus(idx, ctx, res);
-        setFooter(`状态查询完成 (${ctx.name})`);
+        if (!silent) {
+            setFooter(`状态查询完成 (${ctx.name})`);
+        }
     } catch (e) {
         statusEl.innerHTML = `<div class="status-value error">查询失败: ${escapeHtml(e.message)}</div>`;
-        setFooter('状态查询失败');
+        if (!silent) {
+            setFooter('状态查询失败');
+            showToast('状态查询失败', 'error');
+        }
     }
 }
 
@@ -391,19 +654,23 @@ async function installTrafficManager(idx) {
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span> 安装中...';
     setFooter(`正在为 ${ctx.name} 安装 Traffic Manager...`);
+    showToast(`正在安装 Traffic Manager...`, 'info', 5000);
 
     try {
         const res = await api.install_traffic_manager(ctx.name, ctx.source_file);
         if (res.success) {
             setFooter(`Traffic Manager 安装成功 (${ctx.name})`);
-            await refreshStatus(idx);
+            showToast('Traffic Manager 安装成功', 'success');
+            await refreshStatus(idx, true);
         } else {
             setFooter('安装失败: ' + res.message);
+            showToast('安装失败: ' + res.message, 'error');
             btn.innerHTML = '📦 安装 Traffic Manager';
             btn.disabled = false;
         }
     } catch (e) {
         setFooter('安装失败: ' + e.message);
+        showToast('安装 Traffic Manager 失败', 'error');
         btn.innerHTML = '📦 安装 Traffic Manager';
         btn.disabled = false;
     }
@@ -437,41 +704,38 @@ function renderStatus(idx, ctx, data) {
     ).join('');
 
     const tmInstalled = data.traffic_manager_installed;
-    const tmInstallBtn = !tmInstalled
-        ? `<button class="btn btn-sm btn-primary" id="btn-tm-install-${idx}" onclick="installTrafficManager(${idx})">📦 安装 Traffic Manager</button>`
-        : '';
 
     content.innerHTML = `
         <div class="status-inner">
             <div class="status-row">
-                <span class="status-label">Telepresence</span>
+                <span class="status-label">连接状态</span>
                 <span class="status-value ${tp.connected ? 'ok' : 'error'}">${tp.connected ? '已连接' : '未连接'}</span>
             </div>
             <div class="status-row">
-                <span class="status-label">User Daemon</span>
+                <span class="status-label">用户守护进程</span>
                 <span class="status-value">${escapeHtml(tp.user_daemon || '-')}</span>
             </div>
             <div class="status-row">
-                <span class="status-label">Root Daemon</span>
+                <span class="status-label">根守护进程</span>
                 <span class="status-value">${escapeHtml(tp.root_daemon || '-')}</span>
             </div>
             <div class="status-row">
-                <span class="status-label">Traffic Mgr</span>
+                <span class="status-label">流量管理器</span>
                 <span class="status-value">${escapeHtml(tp.traffic_manager || '-')}</span>
             </div>
             <div class="status-row">
                 <span class="status-label">TM 已安装</span>
                 <span class="status-value ${tmInstalled ? 'ok' : 'error'}">${tmInstalled ? '是' : '否'}</span>
-                ${tmInstallBtn}
             </div>
-            ${tp.version ? `<div class="status-row"><span class="status-label">Version</span><span class="status-value">${escapeHtml(tp.version)}</span></div>` : ''}
+            ${tp.version ? `<div class="status-row"><span class="status-label">版本</span><span class="status-value">${escapeHtml(tp.version)}</span></div>` : ''}
             <div class="status-row">
                 <span class="status-label">节点数量</span>
                 <span class="status-value">${nodes.count || 0}</span>
             </div>
             ${nodeRows}
-            ${cluster.connected ? `<div class="status-row"><span class="status-label">Cluster</span><span class="status-value ok">${escapeHtml(cluster.server || 'Connected')}</span></div>` : ''}
+            ${cluster.connected ? `<div class="status-row"><span class="status-label">集群</span><span class="status-value ok">${escapeHtml(cluster.server || '已连接')}</span></div>` : ''}
             ${nodes.error ? `<div class="status-row"><span class="status-label">错误</span><span class="status-value error">${escapeHtml(nodes.error)}</span></div>` : ''}
+            ${!tmInstalled ? `<div class="status-actions"><button class="btn btn-sm btn-primary" id="btn-tm-install-${idx}" onclick="installTrafficManager(${idx})">📦 安装 Traffic Manager</button></div>` : ''}
         </div>
     `;
 }
