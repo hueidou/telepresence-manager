@@ -2,12 +2,35 @@
 
 import os
 import sys
+import ctypes
+import time
 import webview
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app.api import Api
+
+
+def _set_title_bar_color(title, r, g, b):
+    """Set the Windows title bar color to match the app theme."""
+    if os.name != "nt":
+        return
+    try:
+        hwnd = ctypes.windll.user32.FindWindowW(None, title)
+        if not hwnd:
+            return
+        # DWMWA_USE_IMMERSIVE_DARK_MODE = 20 (enable dark mode first)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, 20, ctypes.byref(ctypes.c_int(1)), ctypes.sizeof(ctypes.c_int)
+        )
+        # DWMWA_CAPTION_COLOR = 35 (set custom caption color, COLORREF: 0x00BBGGRR)
+        color_ref = r | (g << 8) | (b << 16)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, 35, ctypes.byref(ctypes.c_int(color_ref)), ctypes.sizeof(ctypes.c_int)
+        )
+    except Exception:
+        pass
 
 
 def _read_version():
@@ -40,10 +63,12 @@ def main():
     api = Api()
 
     version = _read_version()
+    api.set_version(version)
     html_path = _resolve_web_path()
+    window_title = f"Telepresence Manager v{version}"
 
     window = webview.create_window(
-        title=f"Telepresence Manager v{version}",
+        title=window_title,
         url=html_path,
         js_api=api,
         width=900,
@@ -53,7 +78,13 @@ def main():
         text_select=True,
     )
 
-    webview.start(debug=False)
+    def on_loaded():
+        # Small delay to ensure window is fully created
+        time.sleep(0.3)
+        # Match --bg color #1a1b2e (R=0x1a, G=0x1b, B=0x2e)
+        _set_title_bar_color(window_title, 0x1a, 0x1b, 0x2e)
+
+    webview.start(on_loaded, debug=False)
 
 
 if __name__ == "__main__":

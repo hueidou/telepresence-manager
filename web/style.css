@@ -582,3 +582,67 @@ body {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--text-dim);
 }
+
+/* === Update Banner === */
+.update-banner {
+    background: var(--bg-card);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-lg);
+    padding: 14px 18px;
+    margin-bottom: 4px;
+}
+
+.update-banner-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.update-banner-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.update-banner-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.update-banner-notes {
+    font-size: 12px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 500px;
+}
+
+.update-banner-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.update-progress {
+    margin-top: 10px;
+    position: relative;
+}
+
+.update-progress-bar {
+    height: 4px;
+    background: var(--accent);
+    border-radius: 2px;
+    width: 0;
+    transition: width 0.3s ease;
+}
+
+.update-progress-text {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 4px;
+    display: block;
+}

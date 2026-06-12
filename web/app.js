@@ -18,8 +18,99 @@ window.addEventListener('pywebviewready', () => {
     api = window.pywebview.api;
     checkTools();
     scanConfigs();
+    checkForUpdate();
     setupKeyboardShortcuts();
 });
+
+// === Update Check ===
+
+async function checkForUpdate() {
+    try {
+        const res = await api.check_update();
+        if (res.available) {
+            showUpdateBanner(res.latest_version, res.body);
+        }
+    } catch (e) {
+        // Silent fail — update check is non-critical
+    }
+}
+
+function showUpdateBanner(version, releaseNotes) {
+    // Don't show if already dismissed this session
+    if (sessionStorage.getItem('updateDismissed')) return;
+
+    const main = document.querySelector('.main');
+    const existing = document.getElementById('updateBanner');
+    if (existing) existing.remove();
+
+    // Extract first few lines of release notes
+    let notesExcerpt = '';
+    if (releaseNotes) {
+        const lines = releaseNotes.split('\n').filter(l => l.trim().startsWith('-')).slice(0, 5);
+        notesExcerpt = lines.map(l => l.replace(/^-\s*\*\*([^*]+)\*\*:?\s*/, '$1: ')).join('；');
+    }
+
+    const banner = document.createElement('div');
+    banner.id = 'updateBanner';
+    banner.className = 'update-banner';
+    banner.innerHTML = `
+        <div class="update-banner-content">
+            <div class="update-banner-text">
+                <span class="update-banner-title">🆕 发现新版本 v${escapeHtml(version)}</span>
+                ${notesExcerpt ? `<span class="update-banner-notes">${escapeHtml(notesExcerpt)}</span>` : ''}
+            </div>
+            <div class="update-banner-actions">
+                <button class="btn btn-primary btn-sm" onclick="startUpdate()">立即更新</button>
+                <button class="btn btn-sm" onclick="dismissUpdate()">稍后</button>
+            </div>
+        </div>
+        <div class="update-progress hidden" id="updateProgress">
+            <div class="update-progress-bar" id="updateProgressBar"></div>
+            <span class="update-progress-text" id="updateProgressText">下载中... 0%</span>
+        </div>
+    `;
+    main.prepend(banner);
+}
+
+function dismissUpdate() {
+    const banner = document.getElementById('updateBanner');
+    if (banner) banner.remove();
+    sessionStorage.setItem('updateDismissed', '1');
+}
+
+async function startUpdate() {
+    const progressEl = document.getElementById('updateProgress');
+    const barEl = document.getElementById('updateProgressBar');
+    const textEl = document.getElementById('updateProgressText');
+    const actionsEl = document.querySelector('.update-banner-actions');
+
+    // Hide action buttons, show progress
+    actionsEl.style.display = 'none';
+    progressEl.classList.remove('hidden');
+    textEl.textContent = '准备下载...';
+
+    // Poll for download progress via a separate status check
+    // Since pywebview JS API is synchronous per call, we'll show indeterminate progress
+    try {
+        showToast('正在下载更新，完成后将自动重启...', 'info', 10000);
+        barEl.style.width = '50%';
+        textEl.textContent = '下载中...';
+
+        const res = await api.download_and_update();
+
+        // If we reach here, update failed (success means the process exits)
+        barEl.style.width = '100%';
+        barEl.style.background = 'var(--danger)';
+        textEl.textContent = '更新失败: ' + (res.message || '未知错误');
+        actionsEl.style.display = '';
+        showToast('更新失败: ' + (res.message || '未知错误'), 'error');
+    } catch (e) {
+        // This may fire if the process exits during download — that's expected
+        barEl.style.width = '100%';
+        barEl.style.background = 'var(--success)';
+        textEl.textContent = '正在重启...';
+    }
+}
 
 // === Keyboard Shortcuts ===
 
