@@ -10,6 +10,7 @@ class Api:
 
     def __init__(self):
         self._current_version = None
+        self._last_update_info = None
 
     def set_version(self, version):
         """Set the current app version (called from main)."""
@@ -79,15 +80,17 @@ class Api:
         """Check for application updates via GitHub Releases."""
         if not self._current_version:
             return {"available": False, "error": "Version not set"}
-        return updater.check_for_update(self._current_version)
+        info = updater.check_for_update(self._current_version)
+        self._last_update_info = info
+        return info
 
     def download_and_update(self):
         """Download the latest version and apply the update (restart app)."""
         if not self._current_version:
             return {"success": False, "message": "Version not set"}
 
-        # Check for update first to get download URL
-        info = updater.check_for_update(self._current_version)
+        # Use cached info if available, otherwise fetch fresh
+        info = self._last_update_info or updater.check_for_update(self._current_version)
         if not info["available"] or not info["download_url"]:
             return {"success": False, "message": "No update available"}
 

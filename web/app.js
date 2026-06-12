@@ -604,12 +604,6 @@ async function copyContextName(idx) {
     }
 }
 
-function copyToClipboard(text) {
-    navigator.clipboard.writeText(text).then(() => {
-        showToast(`已复制`, 'success', 2000);
-    }).catch(() => {});
-}
-
 // === Connect / Disconnect ===
 
 async function toggleConnect(idx) {

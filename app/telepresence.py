@@ -4,7 +4,6 @@ import subprocess
 import json
 import os
 import shutil
-from concurrent.futures import ThreadPoolExecutor
 
 # Cache for discovered executable paths
 _tool_cache = {}
