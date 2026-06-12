@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telepresence Manager</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1>🚀 Telepresence Manager</h1>
+                <span class="tools-status" id="toolsStatus"></span>
+            </div>
+            <div class="header-right">
+                <button class="btn btn-primary" id="btnScan" onclick="scanConfigs()">
+                    ⟳ 扫描配置
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Config List -->
+            <div class="config-list" id="configList">
+                <div class="empty-state" id="emptyState">
+                    <p>点击「扫描配置」加载 ~/.kube/ 下的 K8s 配置</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <span id="footerMsg">就绪</span>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
