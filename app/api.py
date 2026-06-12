@@ -1,5 +1,6 @@
 """Python API exposed to the frontend via pywebview."""
 
+from concurrent.futures import ThreadPoolExecutor
 from app import kubeconfig, telepresence
 
 
@@ -8,19 +9,15 @@ class Api:
 
     def check_tools(self):
         """Check if telepresence and kubectl are installed, return version and path info."""
-        tp = telepresence.check_installed()
-        kc = telepresence.check_kubectl_installed()
-        tp_ver = telepresence.get_telepresence_version() if tp else None
-        kc_ver = telepresence.get_kubectl_version() if kc else None
-        tp_path = telepresence.get_telepresence_path()
-        kc_path = telepresence.get_kubectl_path()
+        tp = telepresence.check_telepresence()
+        kc = telepresence.check_kubectl()
         return {
-            "telepresence": tp,
-            "kubectl": kc,
-            "telepresence_version": tp_ver,
-            "kubectl_version": kc_ver,
-            "telepresence_path": tp_path,
-            "kubectl_path": kc_path,
+            "telepresence": tp["installed"],
+            "kubectl": kc["installed"],
+            "telepresence_version": tp["version"],
+            "kubectl_version": kc["version"],
+            "telepresence_path": tp["path"],
+            "kubectl_path": kc["path"],
         }
 
     def scan_configs(self):
@@ -45,17 +42,22 @@ class Api:
         return telepresence.get_nodes(context, kubeconfig_path)
 
     def get_full_status(self, context, kubeconfig_path=None):
-        """Get combined status: telepresence status + nodes + traffic manager."""
-        tp_status = telepresence.get_status(context)
-        nodes = telepresence.get_nodes(context, kubeconfig_path)
-        cluster = telepresence.get_cluster_info(context, kubeconfig_path)
-        tm = telepresence.check_traffic_manager(context, kubeconfig_path)
-        return {
-            "telepresence": tp_status,
-            "nodes": nodes,
-            "cluster": cluster,
-            "traffic_manager_installed": tm["installed"],
-        }
+        """Get combined status: telepresence status + nodes + traffic manager.
+
+        Runs all queries in parallel for faster response.
+        """
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            f_tp = executor.submit(telepresence.get_status, context)
+            f_nodes = executor.submit(telepresence.get_nodes, context, kubeconfig_path)
+            f_cluster = executor.submit(telepresence.get_cluster_info, context, kubeconfig_path)
+            f_tm = executor.submit(telepresence.check_traffic_manager, context, kubeconfig_path)
+
+            return {
+                "telepresence": f_tp.result(),
+                "nodes": f_nodes.result(),
+                "cluster": f_cluster.result(),
+                "traffic_manager_installed": f_tm.result()["installed"],
+            }
 
     def install_traffic_manager(self, context, kubeconfig_path=None):
         """Install telepresence traffic manager."""

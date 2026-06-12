@@ -4,6 +4,10 @@ import subprocess
 import json
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor
+
+# Cache for discovered executable paths
+_tool_cache = {}
 
 
 def _run(cmd, timeout=30, env_extra=None):
@@ -17,7 +21,7 @@ def _run(cmd, timeout=30, env_extra=None):
     if resolved_cmd and not os.path.isabs(resolved_cmd[0]):
         tool_name = os.path.basename(resolved_cmd[0]).replace(".exe", "")
         if tool_name in ("telepresence", "kubectl"):
-            full_path = _find_executable(tool_name)
+            full_path = find_executable(tool_name)
             if full_path:
                 resolved_cmd[0] = full_path
 
@@ -37,72 +41,76 @@ def _run(cmd, timeout=30, env_extra=None):
         return -2, "", "Command timed out"
 
 
-def _find_executable(name):
-    """Find full path of an executable, checking PATH and common install locations."""
+def find_executable(name):
+    """Find full path of an executable, checking PATH and common install locations.
+
+    Results are cached to avoid repeated filesystem scans.
+    """
+    if name in _tool_cache:
+        return _tool_cache[name]
+
     path = shutil.which(name)
     if path:
+        _tool_cache[name] = path
         return path
+
     # Check common Windows install locations
     if os.name == "nt":
         search_paths = [
             os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WinGet", "Links"),
-            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WinGet", "Packages"),
             os.path.join(os.environ.get("PROGRAMFILES", ""), "Kubernetes"),
             os.path.join(os.environ.get("PROGRAMFILES", ""), "Docker", "Docker", "resources", "bin"),
         ]
+        # Also scan WinGet Packages for telepresence/kubectl
+        winget_pkg = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WinGet", "Packages")
+        if os.path.isdir(winget_pkg):
+            search_paths.append(winget_pkg)
+
+        target = f"{name}.exe"
         for base in search_paths:
             if not os.path.isdir(base):
                 continue
             for root, dirs, files in os.walk(base):
                 for f in files:
-                    if f.lower() == f"{name}.exe":
-                        return os.path.join(root, f)
-                # Don't recurse too deep
+                    if f.lower() == target:
+                        result = os.path.join(root, f)
+                        _tool_cache[name] = result
+                        return result
+                # Limit recursion depth to 3 levels
                 if root.count(os.sep) - base.count(os.sep) >= 3:
                     dirs.clear()
+
+    _tool_cache[name] = ""
     return ""
 
 
-def check_installed():
-    """Check if telepresence CLI is available."""
-    path = _find_executable("telepresence")
+def check_telepresence():
+    """Check if telepresence CLI is available and get version.
+
+    Returns dict: {installed: bool, version: str|None, path: str}
+    """
+    path = find_executable("telepresence")
     if not path:
-        return False
-    # Also try running version (may fail if daemon not running, but binary exists)
-    code, out, err = _run(["telepresence", "version"])
-    return code == 0 or "OSS Client" in out or "Client" in out
+        return {"installed": False, "version": None, "path": ""}
+
+    code, out, _ = _run(["telepresence", "version"])
+    installed = code == 0 or "OSS Client" in out or "Client" in out
+    version = out if out else None
+    return {"installed": installed, "version": version, "path": path}
 
 
-def get_telepresence_version():
-    """Get telepresence version string."""
-    code, out, err = _run(["telepresence", "version"])
-    if out:
-        return out
-    return None
+def check_kubectl():
+    """Check if kubectl is available and get version.
 
+    Returns dict: {installed: bool, version: str|None, path: str}
+    """
+    path = find_executable("kubectl")
+    if not path:
+        return {"installed": False, "version": None, "path": ""}
 
-def get_telepresence_path():
-    """Get telepresence executable path."""
-    return _find_executable("telepresence")
-
-
-def check_kubectl_installed():
-    """Check if kubectl is available."""
-    code, out, err = _run(["kubectl", "version", "--client"])
-    return code == 0
-
-
-def get_kubectl_version():
-    """Get kubectl version string."""
-    code, out, err = _run(["kubectl", "version", "--client"])
-    if code == 0:
-        return out
-    return None
-
-
-def get_kubectl_path():
-    """Get kubectl executable path."""
-    return _find_executable("kubectl")
+    code, out, _ = _run(["kubectl", "version", "--client"])
+    version = out if code == 0 else None
+    return {"installed": code == 0, "version": version, "path": path}
 
 
 def get_status(context=None):
@@ -153,26 +161,18 @@ def check_traffic_manager(context, kubeconfig_path=None):
     Returns dict:
       {installed: bool, error: str|None}
     """
-    env_extra = {}
-    if kubeconfig_path:
-        env_extra["KUBECONFIG"] = kubeconfig_path
+    env_extra = {"KUBECONFIG": kubeconfig_path} if kubeconfig_path else None
 
-    # Try kubectl to check for traffic-manager deployment
-    cmd = [
-        "kubectl", "--context", context,
-        "get", "deployment", "traffic-manager",
-        "-n", "ambassador",
-        "-o", "jsonpath={.metadata.name}",
-    ]
-    code, out, err = _run(cmd, timeout=10, env_extra=env_extra or None)
-    if code == 0 and "traffic-manager" in out:
-        return {"installed": True, "error": None}
-
-    # Also check in default namespace
-    cmd[5] = "default"
-    code, out, err = _run(cmd, timeout=10, env_extra=env_extra or None)
-    if code == 0 and "traffic-manager" in out:
-        return {"installed": True, "error": None}
+    for ns in ("ambassador", "default"):
+        cmd = [
+            "kubectl", "--context", context,
+            "get", "deployment", "traffic-manager",
+            "-n", ns,
+            "-o", "jsonpath={.metadata.name}",
+        ]
+        code, out, _ = _run(cmd, timeout=10, env_extra=env_extra)
+        if code == 0 and "traffic-manager" in out:
+            return {"installed": True, "error": None}
 
     return {"installed": False, "error": None}
 
@@ -183,16 +183,14 @@ def install_traffic_manager(context, kubeconfig_path=None):
     Returns dict:
       {success: bool, message: str}
     """
-    env_extra = {}
-    if kubeconfig_path:
-        env_extra["KUBECONFIG"] = kubeconfig_path
+    env_extra = {"KUBECONFIG": kubeconfig_path} if kubeconfig_path else None
 
     # Try install first
     cmd = ["telepresence", "helm", "install"]
     if context:
         cmd.extend(["--context", context])
 
-    code, out, err = _run(cmd, timeout=120, env_extra=env_extra or None)
+    code, out, err = _run(cmd, timeout=120, env_extra=env_extra)
     if code == 0:
         return {"success": True, "message": out or "Traffic Manager installed"}
 
@@ -202,7 +200,7 @@ def install_traffic_manager(context, kubeconfig_path=None):
         cmd_upgrade = ["telepresence", "helm", "upgrade"]
         if context:
             cmd_upgrade.extend(["--context", context])
-        code2, out2, err2 = _run(cmd_upgrade, timeout=120, env_extra=env_extra or None)
+        code2, out2, err2 = _run(cmd_upgrade, timeout=120, env_extra=env_extra)
         if code2 == 0:
             return {"success": True, "message": out2 or "Traffic Manager upgraded"}
         return {"success": False, "message": err2 or out2 or "Upgrade failed"}
@@ -220,11 +218,9 @@ def connect(context, kubeconfig_path=None):
     if context:
         cmd.extend(["--context", context])
 
-    env_extra = {}
-    if kubeconfig_path:
-        env_extra["KUBECONFIG"] = kubeconfig_path
+    env_extra = {"KUBECONFIG": kubeconfig_path} if kubeconfig_path else None
 
-    code, out, err = _run(cmd, timeout=60, env_extra=env_extra or None)
+    code, out, err = _run(cmd, timeout=60, env_extra=env_extra)
     if code == 0:
         return {"success": True, "message": out or "Connected successfully"}
     return {"success": False, "message": err or out or "Connection failed"}
@@ -249,11 +245,9 @@ def get_nodes(context, kubeconfig_path=None):
       {count: int, nodes: list, error: str|None}
     """
     cmd = ["kubectl", "--context", context, "get", "nodes", "-o", "json"]
-    env_extra = {}
-    if kubeconfig_path:
-        env_extra["KUBECONFIG"] = kubeconfig_path
+    env_extra = {"KUBECONFIG": kubeconfig_path} if kubeconfig_path else None
 
-    code, out, err = _run(cmd, timeout=15, env_extra=env_extra or None)
+    code, out, err = _run(cmd, timeout=15, env_extra=env_extra)
     if code != 0:
         return {"count": 0, "nodes": [], "error": err or out}
 
@@ -281,11 +275,9 @@ def get_cluster_info(context, kubeconfig_path=None):
       {connected: bool, server: str, error: str|None}
     """
     cmd = ["kubectl", "--context", context, "cluster-info"]
-    env_extra = {}
-    if kubeconfig_path:
-        env_extra["KUBECONFIG"] = kubeconfig_path
+    env_extra = {"KUBECONFIG": kubeconfig_path} if kubeconfig_path else None
 
-    code, out, err = _run(cmd, timeout=15, env_extra=env_extra or None)
+    code, out, err = _run(cmd, timeout=15, env_extra=env_extra)
     if code == 0:
         # Extract control plane URL from output
         server = ""

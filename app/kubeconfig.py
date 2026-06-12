@@ -1,7 +1,6 @@
 """Kubeconfig file discovery and parsing."""
 
 import os
-import glob
 import yaml
 
 
@@ -17,32 +16,18 @@ def scan_kube_dir(kube_dir=None):
     if not os.path.isdir(kube_dir):
         return []
 
-    results = []
-    # Collect all files: config, *.txt, and any other non-hidden files
-    patterns = [
-        os.path.join(kube_dir, "config"),
-        os.path.join(kube_dir, "*.txt"),
-        os.path.join(kube_dir, "*.yml"),
-        os.path.join(kube_dir, "*.yaml"),
-    ]
-    seen = set()
-    for pattern in patterns:
-        for filepath in glob.glob(pattern):
-            if filepath not in seen:
-                seen.add(filepath)
-                results.append(filepath)
-
-    # Also pick up any other regular files not matched above
+    # Collect all non-hidden files in ~/.kube/
+    filepaths = []
     for entry in os.listdir(kube_dir):
+        if entry.startswith("."):
+            continue
         full = os.path.join(kube_dir, entry)
-        if os.path.isfile(full) and full not in seen and not entry.startswith("."):
-            seen.add(full)
-            results.append(full)
+        if os.path.isfile(full):
+            filepaths.append(full)
 
     contexts = []
-    for filepath in results:
-        parsed = _parse_config_file(filepath)
-        contexts.extend(parsed)
+    for filepath in sorted(filepaths):
+        contexts.extend(_parse_config_file(filepath))
 
     return contexts
 
@@ -65,7 +50,6 @@ def _parse_config_file(filepath):
     for doc in docs:
         if not isinstance(doc, dict):
             continue
-        # Heuristic: valid k8s config must have 'clusters' or 'contexts' key
         if not _is_kube_config(doc):
             continue
 
@@ -95,7 +79,6 @@ def _is_kube_config(doc):
     """Check if a YAML document looks like a kubernetes config."""
     if not isinstance(doc, dict):
         return False
-    # Must have apiVersion or clusters/contexts
     if doc.get("kind") == "Config":
         return True
     if "clusters" in doc and "contexts" in doc:
