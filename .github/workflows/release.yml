@@ -1,0 +1,67 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Read version
+        id: version
+        shell: bash
+        run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
+      - name: Build executable
+        run: python scripts/build.py --clean
+
+      - name: Verify build output
+        shell: bash
+        run: |
+          ls -lh dist/TelepresenceManager.exe
+          ls -lh dist/TelepresenceManager-*-portable.zip
+
+      - name: Sync version into Inno Setup script
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION).Trim()
+          $content = (Get-Content installer/setup.iss -Raw) -replace '#define MyVersion ".*"', "#define MyVersion `"$version`""
+          Set-Content installer/setup.iss $content -NoNewline
+
+      - name: Build installer (Inno Setup)
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+        with:
+          path: installer/setup.iss
+          options: /O+
+
+      - name: Verify installer output
+        shell: bash
+        run: ls -lh dist/TelepresenceManager-*-Setup.exe
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/TelepresenceManager.exe
+            dist/TelepresenceManager-*-portable.zip
+            dist/TelepresenceManager-*-Setup.exe

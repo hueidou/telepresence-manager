@@ -25,6 +25,18 @@ Windows 桌面 GUI 工具，用于管理 [Telepresence](https://www.telepresence
 
 ## 安装
 
+### 下载使用（推荐）
+
+从 [GitHub Releases](https://github.com/hueidou/telepresence-manager/releases) 下载最新版本：
+
+| 产物 | 说明 |
+|------|------|
+| `TelepresenceManager.exe` | 独立可执行文件，双击即可运行 |
+| `TelepresenceManager-*-portable.zip` | 便携版，解压后运行 |
+| `TelepresenceManager-*-Setup.exe` | Windows 安装程序，带开始菜单快捷方式 |
+
+### 从源码运行
+
 ```bash
 git clone https://github.com/hueidou/telepresence-manager.git
 cd telepresence-manager
@@ -32,24 +44,41 @@ pip install -r requirements.txt
 python main.py
 ```
 
+### 本地构建
+
+```bash
+pip install pyinstaller
+python scripts/build.py
+```
+
+可执行文件将生成在 `dist/` 目录下。
+
 ## 项目结构
 
 ```
 telepresence-manager/
-├── main.py              # 入口，创建 pywebview 窗口
-├── requirements.txt     # Python 依赖
-├── LICENSE              # MIT License
-├── README.md            # 英文文档
-├── README.zh.md         # 本文档
-├── app/                 # Python 后端
+├── main.py                      # 入口，创建 pywebview 窗口
+├── VERSION                      # 版本号
+├── requirements.txt             # Python 依赖
+├── telepresence_manager.spec    # PyInstaller 构建配置
+├── LICENSE                      # MIT License
+├── README.md                    # 英文文档
+├── README.zh.md                 # 本文档
+├── app/                         # Python 后端
 │   ├── __init__.py
-│   ├── api.py           # pywebview JS API 桥接层
-│   ├── kubeconfig.py    # Kubeconfig 文件发现与解析
-│   └── telepresence.py  # Telepresence / kubectl CLI 封装
-└── web/                 # 前端 UI
-    ├── index.html       # 页面结构
-    ├── style.css        # 暗色主题样式
-    └── app.js           # 前端逻辑
+│   ├── api.py                   # pywebview JS API 桥接层
+│   ├── kubeconfig.py            # Kubeconfig 文件发现与解析
+│   └── telepresence.py          # Telepresence / kubectl CLI 封装
+├── web/                         # 前端 UI
+│   ├── index.html               # 页面结构
+│   ├── style.css                # 暗色主题样式
+│   └── app.js                   # 前端逻辑
+├── scripts/
+│   └── build.py                 # 构建脚本
+├── installer/
+│   └── setup.iss                # Inno Setup 安装程序脚本
+└── .github/workflows/
+    └── release.yml              # CI/CD：自动构建与发布
 ```
 
 ## 工作原理

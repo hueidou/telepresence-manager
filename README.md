@@ -27,6 +27,18 @@ A Windows desktop GUI tool for managing [Telepresence](https://www.telepresence.
 
 ## Installation
 
+### Download (Recommended)
+
+Download the latest release from [GitHub Releases](https://github.com/hueidou/telepresence-manager/releases):
+
+| Artifact | Description |
+|----------|-------------|
+| `TelepresenceManager.exe` | Standalone executable — double-click to run |
+| `TelepresenceManager-*-portable.zip` | Portable package — extract and run |
+| `TelepresenceManager-*-Setup.exe` | Windows installer — install with Start Menu shortcut |
+
+### From Source
+
 ```bash
 git clone https://github.com/hueidou/telepresence-manager.git
 cd telepresence-manager
@@ -34,24 +46,41 @@ pip install -r requirements.txt
 python main.py
 ```
 
+### Build Locally
+
+```bash
+pip install pyinstaller
+python scripts/build.py
+```
+
+The executable will be generated in `dist/`.
+
 ## Project Structure
 
 ```
 telepresence-manager/
-├── main.py              # Entry point, creates pywebview window
-├── requirements.txt     # Python dependencies
-├── LICENSE              # MIT License
-├── README.md            # This file
-├── README.zh.md         # Chinese documentation
-├── app/                 # Python backend
+├── main.py                      # Entry point, creates pywebview window
+├── VERSION                      # Version string
+├── requirements.txt             # Python dependencies
+├── telepresence_manager.spec    # PyInstaller build spec
+├── LICENSE                      # MIT License
+├── README.md                    # This file
+├── README.zh.md                 # Chinese documentation
+├── app/                         # Python backend
 │   ├── __init__.py
-│   ├── api.py           # pywebview JS API bridge
-│   ├── kubeconfig.py    # Kubeconfig discovery & parsing
-│   └── telepresence.py  # Telepresence / kubectl CLI wrappers
-└── web/                 # Frontend UI
-    ├── index.html       # Page structure
-    ├── style.css        # Dark theme styles
-    └── app.js           # Frontend logic
+│   ├── api.py                   # pywebview JS API bridge
+│   ├── kubeconfig.py            # Kubeconfig discovery & parsing
+│   └── telepresence.py          # Telepresence / kubectl CLI wrappers
+├── web/                         # Frontend UI
+│   ├── index.html               # Page structure
+│   ├── style.css                # Dark theme styles
+│   └── app.js                   # Frontend logic
+├── scripts/
+│   └── build.py                 # Build orchestration script
+├── installer/
+│   └── setup.iss                # Inno Setup installer script
+└── .github/workflows/
+    └── release.yml              # CI/CD: build & publish releases
 ```
 
 ## How It Works
