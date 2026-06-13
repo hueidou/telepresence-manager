@@ -121,23 +121,35 @@ async function startUpdate() {
 
     try {
         showToast(t('update.toastDownloading'), 'info', 10000);
-        barEl.style.width = '50%';
+        barEl.classList.add('indeterminate');
         textEl.textContent = t('update.downloading');
 
         const res = await api.download_and_update();
 
         // If we reach here, update failed (success means the process exits)
+        barEl.classList.remove('indeterminate');
         barEl.style.width = '100%';
         barEl.style.background = 'var(--danger)';
         textEl.textContent = t('update.failed', res.message || t('update.unknownError'));
         actionsEl.style.display = '';
         showToast(t('update.failed', res.message || t('update.unknownError')), 'error');
     } catch (e) {
-        // This may fire if the process exits during download — that's expected
+        // The process is exiting (os._exit from backend); show "Restarting..."
+        barEl.classList.remove('indeterminate');
         barEl.style.width = '100%';
         barEl.style.background = 'var(--success)';
         textEl.textContent = t('update.restarting');
     }
+}
+
+// Called from Python via evaluate_js to report download progress
+function _updateProgress(pct) {
+    const barEl = document.getElementById('updateProgressBar');
+    const textEl = document.getElementById('updateProgressText');
+    if (!barEl || !textEl) return;
+    barEl.classList.remove('indeterminate');
+    barEl.style.width = pct + '%';
+    textEl.textContent = t('update.downloadingWithProgress', pct);
 }
 
 // ── Keyboard Shortcuts ──
@@ -499,11 +511,15 @@ function updateConnectionDots(tpStatus) {
     if (!tpStatus) return;
     const isConnected = tpStatus.connected;
 
-    // Update state and all UI
-    contexts.forEach((ctx, idx) => {
-        connectionStates.set(ctx.name, isConnected);
-        updateCardUI(ctx.name, idx);
-    });
+    if (!isConnected) {
+        // Telepresence is fully disconnected — safe to clear all states
+        contexts.forEach((ctx, idx) => {
+            connectionStates.set(ctx.name, false);
+            updateCardUI(ctx.name, idx);
+        });
+    }
+    // When connected, we don't know which specific context is active,
+    // so leave individual card states unchanged.
 }
 
 function updateCardUI(ctxName, idx) {
@@ -527,11 +543,6 @@ async function checkExistingConnections() {
     try {
         const status = await api.get_status();
         if (status.connected) {
-            // Set all contexts to connected state
-            contexts.forEach((ctx) => {
-                connectionStates.set(ctx.name, true);
-            });
-            updateConnectionDots(status);
             showToast(t('connect.foundExisting'), 'info');
         }
         startAutoRefresh();
@@ -650,7 +661,7 @@ function _updateCardData(card, ctx, idx) {
         statusBtn.id = `btn-status-${idx}`;
         statusBtn.setAttribute('onclick', `refreshStatus(${idx})`);
     }
-    const shellBtn = card.querySelector('.card-actions .btn:nth-child(2)');
+    const shellBtn = card.querySelector('[data-action="shell"]');
     if (shellBtn) {
         shellBtn.setAttribute('onclick', `openShell(${idx})`);
     }
@@ -710,7 +721,7 @@ function createContextCard(ctx, idx) {
             <button class="btn btn-success btn-sm" id="btn-conn-${idx}" onclick="toggleConnect(${idx})">
                 ${t('context.connect')}
             </button>
-            <button class="btn btn-sm" onclick="openShell(${idx})">
+            <button class="btn btn-sm" data-action="shell" onclick="openShell(${idx})">
                 ${t('context.shell')}
             </button>
             <button class="btn btn-sm" id="btn-status-${idx}" onclick="refreshStatus(${idx})">

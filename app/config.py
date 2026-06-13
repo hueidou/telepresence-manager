@@ -67,10 +67,11 @@ def get_system_language():
         str: "zh" for Chinese, "en" for English.
     """
     try:
-        lang_code, _ = locale.getdefaultlocale()
+        # getlocale() returns (lang_code, encoding) — e.g. ("zh_CN", "UTF-8")
+        lang_code, _ = locale.getlocale(locale.LC_CTYPE)
         if lang_code:
-            lang_code = lang_code.split("_")[0]
-            if lang_code in ("zh", "zh-CN", "zh-TW", "zh-HK"):
+            lang_code = lang_code.split("_")[0]  # "zh_CN" -> "zh"
+            if lang_code == "zh":
                 return "zh"
     except Exception:
         pass

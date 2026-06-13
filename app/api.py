@@ -1,5 +1,6 @@
 """Python API exposed to the frontend via pywebview."""
 
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from app import kubeconfig, telepresence, updater, config
@@ -157,7 +158,15 @@ class Api:
             return {"success": False, "message": "No update available"}
 
         info("Downloading update from: %s", update_info["download_url"])
-        downloaded = updater.download_update(update_info["download_url"])
+        # Wire up progress callback that reports % to the frontend
+        def _on_progress(pct):
+            try:
+                import webview as _wv2
+                for _w2 in getattr(_wv2, 'windows', []) or []:
+                    _w2.evaluate_js(f'_updateProgress({pct})')
+            except Exception:
+                pass  # eval_js fails if window is already closing; safe to ignore
+        downloaded = updater.download_update(update_info["download_url"], progress_callback=_on_progress)
         if not downloaded:
             log_error("Download failed")
             return {"success": False, "message": "Download failed"}
@@ -165,9 +174,16 @@ class Api:
         info("Downloaded to: %s, applying update...", downloaded)
         # Apply update (launches batch/shell script to replace exe)
         if updater.apply_update(downloaded):
-            info("Update script launched, exiting current process")
-            # Exit current process — the update script will handle the rest
-            sys.exit(0)
+            info("Update script launched, destroying window and exiting process")
+            # Force-exit the entire process (not just this thread) so the
+            # update script can replace the running executable on disk.
+            try:
+                import webview as _wv
+                for _w in getattr(_wv, 'windows', []) or []:
+                    _w.destroy()
+            except Exception:
+                pass
+            os._exit(0)
         else:
             log_error("Failed to apply update")
             return {"success": False, "message": "Failed to apply update"}

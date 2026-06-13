@@ -338,7 +338,6 @@ def open_shell(context, kubeconfig_path=None):
         else:
             shell_parts.append(f'export KUBECONFIG="{kubeconfig_path}"')
     shell_parts.append(f"kubectl --context {context} cluster-info")
-    shell_parts.append("echo.")
     shell_parts.append(f"echo Context: {context}")
     shell_parts.append("echo Type 'kubectl' to interact with the cluster.")
 

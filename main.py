@@ -34,6 +34,22 @@ def _set_title_bar_color(title, r, g, b):
         pass
 
 
+def _wait_for_window(title, timeout=3.0, interval=0.05):
+    """Poll FindWindowW until the window appears, with a timeout.
+
+    Returns the HWND, or 0 if not found within *timeout* seconds.
+    """
+    if os.name != "nt":
+        return None
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        hwnd = ctypes.windll.user32.FindWindowW(None, title)
+        if hwnd:
+            return hwnd
+        time.sleep(interval)
+    return 0
+
+
 def _read_version():
     """Read version from VERSION file."""
     # When frozen by PyInstaller, look next to the exe; otherwise in project root
@@ -85,9 +101,10 @@ def main():
     )
 
     def on_loaded():
-        # Small delay to ensure window is fully created
-        time.sleep(0.3)
         info("Window loaded, setting title bar color")
+        # Poll for the window handle instead of a fixed sleep — handles slow
+        # machines where the window isn't immediately findable by title.
+        _wait_for_window(window_title, timeout=3.0)
         # Match --bg color #1a1b2e (R=0x1a, G=0x1b, B=0x2e)
         _set_title_bar_color(window_title, 0x1a, 0x1b, 0x2e)
 
