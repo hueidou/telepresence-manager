@@ -21,7 +21,7 @@ Windows 桌面 GUI 工具，用于管理 [Telepresence](https://www.telepresence
 
 ## 截图
 
-![](./assets/screenshot.png)
+![](./assets/screenshot-zh.png)
 
 ## 前置依赖
 
