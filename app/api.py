@@ -138,11 +138,13 @@ class Api:
         if not self._current_version:
             return {"available": False, "error": "Version not set"}
         info("Checking for updates (current: %s)", self._current_version)
-        info = updater.check_for_update(self._current_version)
-        self._last_update_info = info
-        if info["available"]:
-            info("Update available: %s", info["latest_version"])
-        return info
+        update_info = updater.check_for_update(self._current_version)
+        self._last_update_info = update_info
+        if update_info["available"]:
+            info("Update available: %s", update_info["latest_version"])
+        else:
+            debug("No update available (current=%s)", self._current_version)
+        return update_info
 
     def download_and_update(self):
         """Download the latest version and apply the update (restart app)."""
@@ -150,12 +152,12 @@ class Api:
             return {"success": False, "message": "Version not set"}
 
         # Use cached info if available, otherwise fetch fresh
-        info = self._last_update_info or updater.check_for_update(self._current_version)
-        if not info["available"] or not info["download_url"]:
+        update_info = self._last_update_info or updater.check_for_update(self._current_version)
+        if not update_info["available"] or not update_info["download_url"]:
             return {"success": False, "message": "No update available"}
 
-        info("Downloading update from: %s", info["download_url"])
-        downloaded = updater.download_update(info["download_url"])
+        info("Downloading update from: %s", update_info["download_url"])
+        downloaded = updater.download_update(update_info["download_url"])
         if not downloaded:
             log_error("Download failed")
             return {"success": False, "message": "Download failed"}
