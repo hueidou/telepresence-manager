@@ -51,6 +51,7 @@ Download the latest release from [GitHub Releases](https://github.com/hueidou/te
 | `*-Setup.exe` | Windows | Inno Setup installer |
 | `TelepresenceManager` | macOS | Binary for macOS |
 | `*-macos.tar.gz` | macOS | Portable package |
+| `*.dmg` | macOS | Disk image with .app bundle |
 | `TelepresenceManager` | Linux | Binary for Linux |
 | `*-linux.tar.gz` | Linux | Portable package |
 | `*.deb` | Linux (Debian/Ubuntu) | Debian package |

@@ -15,6 +15,13 @@ from app.logger import debug, info, error as log_error
 GITHUB_REPO = "hueidou/telepresence-manager"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
+# Priority order of asset types to match for each platform
+# (tried in order, first match wins)
+_ASSET_PRIORITY = {
+    "nt":     [".exe"],                              # Windows
+    "darwin": [".dmg", "macos.tar.gz", "macos.zip"],  # macOS: prefer .dmg
+}
+
 
 def _parse_version(v):
     """Parse version string like '1.2.3' into comparable tuple."""
@@ -32,18 +39,14 @@ def _get_exe_path():
     return None
 
 
-def _platform_asset_suffix():
-    """Return the platform-appropriate asset name suffix to look for in releases.
+def _platform_asset_suffixes():
+    """Return platform-appropriate asset suffixes to look for, in priority order.
 
     Returns:
-        str: e.g. 'win.zip', 'macos.tar.gz', 'linux.tar.gz'
+        list of str: e.g. ['.dmg', 'macos.tar.gz'] on macOS
     """
-    if os.name == "nt":
-        return "win.zip"
-    elif sys.platform == "darwin":
-        return "macos.tar.gz"
-    else:
-        return "linux.tar.gz"
+    key = "nt" if os.name == "nt" else (sys.platform if sys.platform in _ASSET_PRIORITY else "linux")
+    return _ASSET_PRIORITY.get(key, ["linux.tar.gz", ".tar.gz"])
 
 
 def _platform_exe_name():
@@ -70,7 +73,7 @@ def check_for_update(current_version):
         "error": None,
     }
 
-    suffix = _platform_asset_suffix()
+    suffixes = _platform_asset_suffixes()
 
     try:
         req = urllib.request.Request(
@@ -91,12 +94,12 @@ def check_for_update(current_version):
             # Find the platform-appropriate asset
             for asset in data.get("assets", []):
                 name = asset.get("name", "")
-                if name.endswith(suffix) or name == _platform_exe_name():
+                if any(name.endswith(s) for s in suffixes) or name == _platform_exe_name():
                     result["download_url"] = asset.get("browser_download_url", "")
                     break
 
         if result["available"]:
-            info("Update available: %s -> %s (asset: %s)", current_version, latest_version, suffix)
+            info("Update available: %s -> %s (assets: %s)", current_version, latest_version, suffixes)
         else:
             debug("No update available (current=%s, latest=%s)", current_version, latest_version)
 

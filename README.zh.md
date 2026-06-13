@@ -51,6 +51,7 @@
 | `*-Setup.exe` | Windows | 安装程序 |
 | `TelepresenceManager` | macOS | macOS 二进制 |
 | `*-macos.tar.gz` | macOS | 便携版 |
+| `*.dmg` | macOS | 磁盘映像，含 .app 程序包 |
 | `TelepresenceManager` | Linux | Linux 二进制 |
 | `*-linux.tar.gz` | Linux | 便携版 |
 | `*.deb` | Linux (Debian/Ubuntu) | Debian 包 |

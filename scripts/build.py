@@ -10,6 +10,7 @@ Generates:
   macOS:
     - dist/TelepresenceManager
     - dist/TelepresenceManager-{version}-macos.tar.gz
+    - dist/TelepresenceManager-{version}.dmg (via installer/build-macos.sh)
   Linux:
     - dist/TelepresenceManager
     - dist/TelepresenceManager-{version}-linux.tar.gz
