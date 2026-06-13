@@ -4,6 +4,7 @@ import subprocess
 import json
 import os
 import shutil
+import sys
 
 # Cache for discovered executable paths
 _tool_cache = {}
@@ -78,6 +79,32 @@ def find_executable(name):
                 # Limit recursion depth to 3 levels
                 if root.count(os.sep) - base.count(os.sep) >= 3:
                     dirs.clear()
+
+    elif sys.platform == "darwin":
+        # macOS: check Homebrew and MacPorts locations
+        search_paths = [
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/usr/local/bin",
+            "/usr/local/kubectl/bin",
+        ]
+        for base in search_paths:
+            candidate = os.path.join(base, name)
+            if os.path.isfile(candidate):
+                _tool_cache[name] = candidate
+                return candidate
+
+    else:
+        # Linux: check snap and flatpak locations
+        search_paths = [
+            "/snap/bin",
+            "/var/lib/flatpak/exports/bin",
+        ]
+        for base in search_paths:
+            candidate = os.path.join(base, name)
+            if os.path.isfile(candidate):
+                _tool_cache[name] = candidate
+                return candidate
 
     _tool_cache[name] = ""
     return ""
@@ -289,31 +316,88 @@ def get_cluster_info(context, kubeconfig_path=None):
 
 
 def open_shell(context, kubeconfig_path=None):
-    """Open a new cmd.exe window with the given context.
+    """Open a new terminal window with the given context.
+
+    Platform support:
+      - Windows: cmd.exe with CREATE_NEW_CONSOLE
+      - macOS:   Terminal.app via osascript
+      - Linux:   auto-detect gnome-terminal / konsole / xterm
 
     Returns dict:
       {success: bool, message: str}
     """
-    if os.name != "nt":
-        return {"success": False, "message": "Only Windows is supported"}
-
-    # Build the command to run in the new shell
-    parts = []
+    # Build the shell init commands
+    shell_parts = []
     if kubeconfig_path:
-        parts.append(f'set "KUBECONFIG={kubeconfig_path}"')
-    parts.append(f"kubectl --context {context} cluster-info")
-    parts.append("echo.")
-    parts.append(f"echo Context: {context}")
-    parts.append("echo Type 'kubectl' to interact with the cluster.")
-    parts.append("cmd /k")
-
-    inner_cmd = " & ".join(parts)
+        if os.name == "nt":
+            shell_parts.append(f'set "KUBECONFIG={kubeconfig_path}"')
+        else:
+            shell_parts.append(f'export KUBECONFIG="{kubeconfig_path}"')
+    shell_parts.append(f"kubectl --context {context} cluster-info")
+    shell_parts.append("echo.")
+    shell_parts.append(f"echo Context: {context}")
+    shell_parts.append("echo Type 'kubectl' to interact with the cluster.")
 
     try:
-        subprocess.Popen(
-            ["cmd.exe", "/k", inner_cmd],
-            creationflags=subprocess.CREATE_NEW_CONSOLE,
-        )
+        if os.name == "nt":
+            # ── Windows ──────────────────────────────────────
+            shell_parts.append("cmd /k")
+            inner_cmd = " & ".join(shell_parts)
+            subprocess.Popen(
+                ["cmd.exe", "/k", inner_cmd],
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
+            )
+
+        elif sys.platform == "darwin":
+            # ── macOS ────────────────────────────────────────
+            shell_cmd = "; ".join(shell_parts)
+            # Use osascript to open a new Terminal window
+            script = (
+                f'tell application "Terminal"\n'
+                f'  do script "{shell_cmd.replace(chr(34), chr(92) + chr(34))}; exec $SHELL"\n'
+                f'  activate\n'
+                f'end tell'
+            )
+            subprocess.Popen(
+                ["osascript", "-e", script],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+        else:
+            # ── Linux ────────────────────────────────────────
+            shell_cmd = "; ".join(shell_parts) + "; exec $SHELL"
+            # Detect available terminal emulator
+            terminals = ["gnome-terminal", "konsole", "xfce4-terminal", "lxterminal", "xterm"]
+            term = None
+            for t in terminals:
+                if shutil.which(t):
+                    term = t
+                    break
+            if not term:
+                return {"success": False, "message": "No supported terminal found"}
+
+            if term == "gnome-terminal":
+                subprocess.Popen(
+                    ["gnome-terminal", "--", "bash", "-c", shell_cmd],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            elif term in ("konsole", "xfce4-terminal", "lxterminal"):
+                subprocess.Popen(
+                    [term, "-e", "bash", "-c", shell_cmd],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            else:
+                # xterm fallback
+                subprocess.Popen(
+                    ["xterm", "-e", "bash", "-c", shell_cmd],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+
         return {"success": True, "message": "Shell opened"}
+
     except Exception as e:
         return {"success": False, "message": str(e)}

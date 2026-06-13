@@ -8,11 +8,16 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
-    runs-on: windows-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -22,11 +27,17 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
+
+      - name: Install Linux system dependencies (WebKit2GTK)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libwebkit2gtk-4.1-dev
 
       - name: Read version
         id: version
@@ -38,32 +49,56 @@ jobs:
 
       - name: Verify build output
         shell: bash
-        run: |
-          ls -lh dist/TelepresenceManager.exe
-          ls -lh dist/TelepresenceManager-*-portable.zip
+        run: ls -lh dist/
 
-      - name: Sync version into Inno Setup script
+      - name: Sync version into Inno Setup script (Windows only)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $version = (Get-Content VERSION).Trim()
           $content = (Get-Content installer/setup.iss -Raw) -replace '#define MyVersion ".*"', "#define MyVersion `"$version`""
           Set-Content installer/setup.iss $content -NoNewline
 
-      - name: Build installer (Inno Setup)
+      - name: Build Windows installer (Inno Setup)
+        if: runner.os == 'Windows'
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
         with:
           path: installer/setup.iss
           options: /O+
 
-      - name: Verify installer output
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          path: dist/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts from all platforms
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts for clean asset names
         shell: bash
-        run: ls -lh dist/TelepresenceManager-*-Setup.exe
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f -print0 | while IFS= read -r -d '' f; do
+            base=$(basename "$f")
+            if [ -e "release-assets/$base" ]; then
+              # Prefix with OS name to avoid overwrite (e.g. TelepresenceManager)
+              dir=$(basename "$(dirname "$f")")
+              cp "$f" "release-assets/${dir}-${base}"
+            else
+              cp "$f" "release-assets/$base"
+            fi
+          done
+          ls -lh release-assets/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: |
-            dist/TelepresenceManager.exe
-            dist/TelepresenceManager-*-portable.zip
-            dist/TelepresenceManager-*-Setup.exe
+          files: release-assets/*
