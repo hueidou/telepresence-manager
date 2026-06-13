@@ -147,7 +147,10 @@ def get_status(context=None):
     """Get telepresence connection status.
 
     Returns dict:
-      {connected: bool, user_daemon: str, root_daemon: str, traffic_manager: str, version: str, error: str|None}
+      {connected: bool, context: str|None, user_daemon: str, root_daemon: str, traffic_manager: str, version: str, error: str|None}
+
+    ``connected`` is True only when the traffic manager is connected AND
+    (no specific ``context`` was requested OR the active context matches).
     """
     cmd = ["telepresence", "status"]
 
@@ -157,6 +160,7 @@ def get_status(context=None):
     # Parse each field from raw output
     result = {
         "connected": False,
+        "context": None,
         "user_daemon": "Unknown",
         "root_daemon": "Unknown",
         "traffic_manager": "Unknown",
@@ -169,7 +173,11 @@ def get_status(context=None):
         if not line or "has been deprecated" in line.lower():
             continue
         lower = line.lower()
-        if "user daemon" in lower:
+        # "Kubernetes context: xxx" must be checked before the generic
+        # "traffic manager" match to avoid overwriting the status field.
+        if "kubernetes context" in lower or lower.startswith("context"):
+            result["context"] = line.split(":", 1)[-1].strip() if ":" in line else None
+        elif "user daemon" in lower:
             result["user_daemon"] = line.split(":", 1)[-1].strip() if ":" in line else line
         elif "root daemon" in lower:
             result["root_daemon"] = line.split(":", 1)[-1].strip() if ":" in line else line
@@ -178,7 +186,14 @@ def get_status(context=None):
         elif lower.startswith("version"):
             result["version"] = line.split(":", 1)[-1].strip() if ":" in line else line
 
-    result["connected"] = result["traffic_manager"].lower() == "connected"
+    tm_connected = result["traffic_manager"].lower() == "connected"
+    if tm_connected:
+        if context:
+            # Only mark connected when the active context matches the requested one
+            result["connected"] = (result["context"] == context)
+        else:
+            result["connected"] = True
+
     if code != 0 and not any(v != "Unknown" for v in [result["user_daemon"], result["root_daemon"], result["traffic_manager"]]):
         result["error"] = raw
 
@@ -330,18 +345,18 @@ def open_shell(context, kubeconfig_path=None):
     Returns dict:
       {success: bool, message: str}
     """
-    # Build the shell init commands
+    # Build the shell init commands.
+    # Use --kubeconfig flag directly rather than relying on KUBECONFIG env var
+    # set via cmd.exe `set` — cmd.exe quote-parsing in /c "/k ..." strips or
+    # embeds quotes unpredictably, causing "context does not exist" errors.
+    kc_flag = f'--kubeconfig {kubeconfig_path}' if kubeconfig_path else ""
     shell_parts = []
-    if kubeconfig_path:
-        if os.name == "nt":
-            shell_parts.append(f'set "KUBECONFIG={kubeconfig_path}"')
-        else:
-            shell_parts.append(f'export KUBECONFIG="{kubeconfig_path}"')
-    shell_parts.append(f'kubectl --context "{context}" cluster-info')
+    shell_parts.append(f"kubectl {kc_flag} --context {context} cluster-info")
     shell_parts.append(f"echo Context: {context}")
     shell_parts.append("echo Type 'kubectl' to interact with the cluster.")
 
-    # Ensure the subprocess inherits the full environment with KUBECONFIG set
+    # Also set KUBECONFIG in the subprocess environment so that subsequent
+    # kubectl commands the user types in the interactive shell use the same config.
     env = os.environ.copy()
     if kubeconfig_path:
         env["KUBECONFIG"] = kubeconfig_path

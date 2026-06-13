@@ -10,7 +10,6 @@ let api = null;
 
 // ── State ──
 let contexts = [];
-let expandedStatus = new Set(); // Track which cards have status panel open
 let connectionStates = new Map(); // contextName -> boolean (connected)
 let autoRefreshTimer = null;
 let AUTO_REFRESH_INTERVAL = 30000; // 30s default, overridden by config
@@ -517,9 +516,14 @@ function updateConnectionDots(tpStatus) {
             connectionStates.set(ctx.name, false);
             updateCardUI(ctx.name, idx);
         });
+    } else if (tpStatus.context) {
+        // Mark the specific connected context
+        contexts.forEach((ctx, idx) => {
+            const shouldBeConnected = ctx.name === tpStatus.context;
+            connectionStates.set(ctx.name, shouldBeConnected);
+            updateCardUI(ctx.name, idx);
+        });
     }
-    // When connected, we don't know which specific context is active,
-    // so leave individual card states unchanged.
 }
 
 function updateCardUI(ctxName, idx) {
@@ -544,6 +548,8 @@ async function checkExistingConnections() {
         const status = await api.get_status();
         if (status.connected) {
             showToast(t('connect.foundExisting'), 'info');
+            // Update card UI to reflect existing connection
+            updateConnectionDots(status);
         }
         startAutoRefresh();
     } catch (e) {
@@ -605,17 +611,6 @@ function renderList() {
         }
     });
 
-    // Restore expanded status panels
-    expandedStatus.forEach(name => {
-        const idx = contexts.findIndex(c => c.name === name);
-        if (idx >= 0) {
-            const statusEl = document.getElementById(`status-${idx}`);
-            if (statusEl) {
-                statusEl.classList.remove('hidden');
-                refreshStatus(idx, true); // silent refresh
-            }
-        }
-    });
 }
 
 function _updateCardData(card, ctx, idx) {
@@ -626,22 +621,8 @@ function _updateCardData(card, ctx, idx) {
     card.dataset.ctxSource = ctx.source_file;
 
     // Update badge
-    const badge = card.querySelector('.card-top > .card-badge');
+    const badge = card.querySelector('.card-top-right .card-badge');
     if (badge) badge.textContent = ctx.cluster;
-
-    // Update current badge
-    let currentBadge = card.querySelector('.card-current-badge');
-    if (ctx.is_current) {
-        if (!currentBadge) {
-            currentBadge = document.createElement('span');
-            currentBadge.className = 'card-badge card-current-badge';
-            currentBadge.style.color = 'var(--accent)';
-            currentBadge.textContent = t('context.current');
-            card.querySelector('.card-name').appendChild(currentBadge);
-        }
-    } else if (currentBadge) {
-        currentBadge.remove();
-    }
 
     // Update meta
     const metaSpans = card.querySelectorAll('.card-meta span');
@@ -670,8 +651,8 @@ function _updateCardData(card, ctx, idx) {
         copyBtn.setAttribute('onclick', `copyContextName(${idx})`);
     }
 
-    // Update status panel id
-    const statusEl = card.querySelector('.card-status');
+    // Update status indicator id
+    const statusEl = card.querySelector('.card-status-indicator');
     if (statusEl) statusEl.id = `status-${idx}`;
 
     // Update dot id
@@ -700,18 +681,16 @@ function createContextCard(ctx, idx) {
     card.dataset.ctxServer = ctx.server || '';
     card.dataset.ctxSource = ctx.source_file;
 
-    const currentBadge = ctx.is_current
-        ? `<span class="card-badge card-current-badge" style="color:var(--accent)">${t('context.current')}</span>`
-        : '';
-
     card.innerHTML = `
         <div class="card-top">
             <div class="card-name">
                 <span class="dot" id="dot-${idx}"></span>
                 <h3>${escapeHtml(ctx.name)}</h3>
-                ${currentBadge}
             </div>
-            <span class="card-badge">${escapeHtml(ctx.cluster)}</span>
+            <div class="card-top-right">
+                <span class="card-status-indicator" id="status-${idx}">-</span>
+                <span class="card-badge">${escapeHtml(ctx.cluster)}</span>
+            </div>
         </div>
         <div class="card-meta">
             <span>🌐 <span class="url-text">${escapeHtml(ctx.server || t('context.server'))}</span></span>
@@ -729,7 +708,6 @@ function createContextCard(ctx, idx) {
             </button>
             <button class="btn-icon" onclick="copyContextName(${idx})" title="${t('context.copy')}">📋</button>
         </div>
-        <div class="card-status hidden" id="status-${idx}"></div>
     `;
     return card;
 }
@@ -850,35 +828,23 @@ async function refreshStatus(idx, silent = false) {
     const statusEl = document.getElementById(`status-${idx}`);
     const btn = document.getElementById(`btn-status-${idx}`);
 
-    // Toggle: if already visible and not silent refresh, hide it
-    if (!silent && !statusEl.classList.contains('hidden')) {
-        statusEl.classList.add('hidden');
-        statusEl.innerHTML = '';
-        btn.innerHTML = t('context.status');
-        expandedStatus.delete(ctx.name);
-        return;
-    }
-
-    // Mark as expanded
-    expandedStatus.add(ctx.name);
-    statusEl.classList.remove('hidden');
     if (!silent) {
-        statusEl.innerHTML = `<span class="spinner"></span> ${t('status.title')}`;
-        btn.innerHTML = t('status.collapse');
-        setFooter(t('scan.scanning'));
+        statusEl.innerHTML = `<span class="spinner"></span>`;
+        btn.disabled = true;
     }
 
     try {
         const res = await api.get_full_status(ctx.name, ctx.source_file);
         renderStatus(idx, ctx, res);
-        if (!silent) {
-            setFooter(t('status.queryComplete', ctx.name));
-        }
     } catch (e) {
-        statusEl.innerHTML = `<div class="status-value error">${t('status.queryFailed', escapeHtml(e.message))}</div>`;
+        statusEl.textContent = '-';
+        statusEl.className = 'card-status-indicator';
         if (!silent) {
-            setFooter(t('scan.failed', ''));
-            showToast(t('scan.failed', ''), 'error');
+            showToast(t('status.queryFailed', e.message), 'error');
+        }
+    } finally {
+        if (!silent) {
+            btn.disabled = false;
         }
     }
 }
@@ -912,59 +878,34 @@ async function installTrafficManager(idx) {
 }
 
 function renderStatus(idx, ctx, data) {
-    const content = document.getElementById(`status-${idx}`);
+    const statusEl = document.getElementById(`status-${idx}`);
     const tp = data.telepresence || {};
     const nodes = data.nodes || {};
     const cluster = data.cluster || {};
+    const tmInstalled = data.traffic_manager_installed;
 
-    // Update connection state based on status
     const isConnected = tp.connected || false;
     connectionStates.set(ctx.name, isConnected);
     updateCardUI(ctx.name, idx);
 
-    const nodeRows = (nodes.nodes || []).map(n =>
-        `<div class="status-row">
-            <span class="status-label">${t('status.node')}</span>
-            <span class="status-value">${escapeHtml(n.name)}</span>
-            <span class="status-value ${n.status === 'Ready' ? 'ok' : 'error'}">(${n.status})</span>
-        </div>`
-    ).join('');
+    // Build a compact status summary on the right side of the card
+    const parts = [];
+    if (isConnected) {
+        parts.push(`<span class="status-value ok">${t('status.connected')}</span>`);
+    } else {
+        parts.push(`<span class="status-value error">${t('status.disconnected')}</span>`);
+    }
+    if (tp.version) {
+        const ver = tp.version.startsWith('v') ? tp.version : 'v' + tp.version;
+        parts.push(`<span class="status-value dim">${escapeHtml(ver)}</span>`);
+    }
+    parts.push(`<span class="status-value dim" title="${t('status.nodeCount')}">${nodes.count || 0} ${t('status.node')}</span>`);
+    if (!tmInstalled) {
+        parts.push(`<span class="status-value error" title="${t('status.installTm')}" style="cursor:pointer" onclick="installTrafficManager(${idx})">TM?</span>`);
+    }
 
-    const tmInstalled = data.traffic_manager_installed;
-
-    content.innerHTML = `
-        <div class="status-inner">
-            <div class="status-row">
-                <span class="status-label">${t('status.connectionState')}</span>
-                <span class="status-value ${isConnected ? 'ok' : 'error'}">${isConnected ? t('status.connected') : t('status.disconnected')}</span>
-            </div>
-            <div class="status-row">
-                <span class="status-label">${t('status.userDaemon')}</span>
-                <span class="status-value">${escapeHtml(tp.user_daemon || t('status.dash'))}</span>
-            </div>
-            <div class="status-row">
-                <span class="status-label">${t('status.rootDaemon')}</span>
-                <span class="status-value">${escapeHtml(tp.root_daemon || t('status.dash'))}</span>
-            </div>
-            <div class="status-row">
-                <span class="status-label">${t('status.trafficManager')}</span>
-                <span class="status-value">${escapeHtml(tp.traffic_manager || t('status.dash'))}</span>
-            </div>
-            <div class="status-row">
-                <span class="status-label">${t('status.tmInstalled')}</span>
-                <span class="status-value ${tmInstalled ? 'ok' : 'error'}">${tmInstalled ? t('status.yes') : t('status.no')}</span>
-            </div>
-            ${tp.version ? `<div class="status-row"><span class="status-label">${t('status.version')}</span><span class="status-value">${escapeHtml(tp.version)}</span></div>` : ''}
-            <div class="status-row">
-                <span class="status-label">${t('status.nodeCount')}</span>
-                <span class="status-value">${nodes.count || 0}</span>
-            </div>
-            ${nodeRows}
-            ${cluster.connected ? `<div class="status-row"><span class="status-label">${t('status.cluster')}</span><span class="status-value ok">${escapeHtml(cluster.server || t('status.connected'))}</span></div>` : ''}
-            ${nodes.error ? `<div class="status-row"><span class="status-label">${t('status.error')}</span><span class="status-value error">${escapeHtml(nodes.error)}</span></div>` : ''}
-            ${!tmInstalled ? `<div class="status-actions"><button class="btn btn-sm btn-primary" id="btn-tm-install-${idx}" onclick="installTrafficManager(${idx})">${t('status.installTm')}</button></div>` : ''}
-        </div>
-    `;
+    statusEl.innerHTML = parts.join(' ');
+    statusEl.className = 'card-status-indicator' + (isConnected ? ' connected' : '');
 }
 
 // ── Utilities ──
