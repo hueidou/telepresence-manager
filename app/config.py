@@ -1,0 +1,72 @@
+"""Application configuration management.
+
+Config stored at ~/.kube/telepresence-manager.json
+"""
+
+import os
+import json
+import locale
+
+CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".kube")
+CONFIG_FILE = os.path.join(CONFIG_DIR, "telepresence-manager.json")
+
+DEFAULT_CONFIG = {
+    "language": "auto",
+    "refreshInterval": 30,
+}
+
+
+def load():
+    """Load config from ~/.kube/telepresence-manager.json.
+
+    Merges with defaults so missing keys are filled in.
+    Returns dict.
+    """
+    try:
+        if os.path.isfile(CONFIG_FILE):
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            if isinstance(cfg, dict):
+                merged = DEFAULT_CONFIG.copy()
+                merged.update(cfg)
+                return merged
+    except (json.JSONDecodeError, OSError):
+        pass
+    return DEFAULT_CONFIG.copy()
+
+
+def save(config):
+    """Save config to ~/.kube/telepresence-manager.json.
+
+    Args:
+        config: dict of config values to save.
+
+    Returns:
+        bool: True on success.
+    """
+    try:
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        merged = DEFAULT_CONFIG.copy()
+        merged.update(config)
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(merged, f, indent=2, ensure_ascii=False)
+        return True
+    except OSError:
+        return False
+
+
+def get_system_language():
+    """Detect the system UI language.
+
+    Returns:
+        str: "zh" for Chinese, "en" for English.
+    """
+    try:
+        lang_code, _ = locale.getdefaultlocale()
+        if lang_code:
+            lang_code = lang_code.split("_")[0]
+            if lang_code in ("zh", "zh-CN", "zh-TW", "zh-HK"):
+                return "zh"
+    except Exception:
+        pass
+    return "en"

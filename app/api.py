@@ -2,7 +2,7 @@
 
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from app import kubeconfig, telepresence, updater
+from app import kubeconfig, telepresence, updater, config
 
 
 class Api:
@@ -15,6 +15,36 @@ class Api:
     def set_version(self, version):
         """Set the current app version (called from main)."""
         self._current_version = version
+
+    # ── Config ──────────────────────────────────────────────────────
+
+    def get_config(self):
+        """Load app config from ~/.kube/telepresence-manager.json.
+
+        Returns dict with keys: language, refreshInterval.
+        """
+        return config.load()
+
+    def save_config(self, cfg):
+        """Save app config to ~/.kube/telepresence-manager.json.
+
+        Args:
+            cfg: dict of config values to save.
+
+        Returns:
+            dict: {success: bool, message: str}
+        """
+        if config.save(cfg):
+            return {"success": True, "message": "Config saved"}
+        return {"success": False, "message": "Failed to save config"}
+
+    def get_system_language(self):
+        """Detect system UI language.
+
+        Returns:
+            str: "zh" or "en"
+        """
+        return config.get_system_language()
 
     def check_tools(self):
         """Check if telepresence and kubectl are installed, return version and path info."""
