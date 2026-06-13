@@ -13,6 +13,7 @@ a = Analysis(
         (os.path.join(base_dir, 'web', 'index.html'), 'web'),
         (os.path.join(base_dir, 'web', 'style.css'), 'web'),
         (os.path.join(base_dir, 'web', 'app.js'), 'web'),
+        (os.path.join(base_dir, 'web', 'i18n.js'), 'web'),
         (os.path.join(base_dir, 'VERSION'), '.'),
     ],
     hiddenimports=[],
@@ -32,4 +33,5 @@ exe = EXE(
     [],
     name='TelepresenceManager',
     upx=True,
+    console=False,
 )
