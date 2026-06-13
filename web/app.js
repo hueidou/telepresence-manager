@@ -615,7 +615,7 @@ function _updateCardData(card, ctx, idx) {
     card.dataset.ctxSource = ctx.source_file;
 
     // Update badge
-    const badge = card.querySelector('.card-badge');
+    const badge = card.querySelector('.card-top > .card-badge');
     if (badge) badge.textContent = ctx.cluster;
 
     // Update current badge
@@ -861,7 +861,7 @@ async function refreshStatus(idx, silent = false) {
         const res = await api.get_full_status(ctx.name, ctx.source_file);
         renderStatus(idx, ctx, res);
         if (!silent) {
-            setFooter(t('scan.complete', ctx.name));
+            setFooter(t('status.queryComplete', ctx.name));
         }
     } catch (e) {
         statusEl.innerHTML = `<div class="status-value error">${t('status.queryFailed', escapeHtml(e.message))}</div>`;
