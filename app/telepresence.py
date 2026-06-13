@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import sys
+from app.logger import debug, info, error as log_error, exception
 
 # Cache for discovered executable paths
 _tool_cache = {}
@@ -34,10 +35,13 @@ def _run(cmd, timeout=30, env_extra=None):
             env=env,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
+        debug("cmd=%s returncode=%d", resolved_cmd[0], r.returncode)
         return r.returncode, r.stdout.strip(), r.stderr.strip()
     except FileNotFoundError:
+        log_error("Command not found: %s", resolved_cmd[0])
         return -1, "", f"Command not found: {resolved_cmd[0]}"
     except subprocess.TimeoutExpired:
+        log_error("Command timed out: %s (timeout=%ds)", resolved_cmd[0], timeout)
         return -2, "", "Command timed out"
 
 
@@ -397,7 +401,10 @@ def open_shell(context, kubeconfig_path=None):
                     stderr=subprocess.DEVNULL,
                 )
 
+        platform_name = "Windows" if os.name == "nt" else ("macOS" if sys.platform == "darwin" else "Linux")
+        info("Shell opened for context '%s' via %s", context, platform_name)
         return {"success": True, "message": "Shell opened"}
 
     except Exception as e:
+        log_error("Failed to open shell for context '%s': %s", context, e)
         return {"success": False, "message": str(e)}

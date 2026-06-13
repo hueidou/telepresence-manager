@@ -2,6 +2,7 @@
 
 import os
 import yaml
+from app.logger import debug, info, error as log_error
 
 
 def scan_kube_dir(kube_dir=None):
@@ -14,6 +15,7 @@ def scan_kube_dir(kube_dir=None):
         kube_dir = os.path.join(os.path.expanduser("~"), ".kube")
 
     if not os.path.isdir(kube_dir):
+        debug("kube dir not found: %s", kube_dir)
         return []
 
     # Collect all non-hidden files in ~/.kube/
@@ -25,10 +27,15 @@ def scan_kube_dir(kube_dir=None):
         if os.path.isfile(full):
             filepaths.append(full)
 
+    info("Scanning %d files in %s", len(filepaths), kube_dir)
     contexts = []
     for filepath in sorted(filepaths):
-        contexts.extend(_parse_config_file(filepath))
+        parsed = _parse_config_file(filepath)
+        if parsed:
+            debug("Parsed %d contexts from %s", len(parsed), filepath)
+        contexts.extend(parsed)
 
+    info("Found %d contexts total", len(contexts))
     return contexts
 
 

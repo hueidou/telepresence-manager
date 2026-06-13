@@ -6,6 +6,7 @@ Config stored at ~/.kube/telepresence-manager.json
 import os
 import json
 import locale
+from app.logger import debug, info, error as log_error
 
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".kube")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "telepresence-manager.json")
@@ -29,9 +30,11 @@ def load():
             if isinstance(cfg, dict):
                 merged = DEFAULT_CONFIG.copy()
                 merged.update(cfg)
+                debug("Config loaded from %s: %s", CONFIG_FILE, merged)
                 return merged
-    except (json.JSONDecodeError, OSError):
-        pass
+    except (json.JSONDecodeError, OSError) as e:
+        log_error("Failed to load config: %s", e)
+    debug("Using default config")
     return DEFAULT_CONFIG.copy()
 
 
@@ -50,8 +53,10 @@ def save(config):
         merged.update(config)
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(merged, f, indent=2, ensure_ascii=False)
+        info("Config saved to %s: %s", CONFIG_FILE, merged)
         return True
-    except OSError:
+    except OSError as e:
+        log_error("Failed to save config: %s", e)
         return False
 
 

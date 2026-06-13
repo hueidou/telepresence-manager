@@ -5,6 +5,7 @@ import sys
 import ctypes
 import time
 import webview
+from app.logger import info, debug, error as log_error
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -60,12 +61,17 @@ def _resolve_web_path():
 
 
 def main():
+    info("Starting Telepresence Manager")
+    debug("Python %s, platform=%s, frozen=%s", sys.version, sys.platform, getattr(sys, 'frozen', False))
+
     api = Api()
 
     version = _read_version()
     api.set_version(version)
     html_path = _resolve_web_path()
     window_title = f"Telepresence Manager v{version}"
+
+    info("Version=%s, web=%s", version, html_path)
 
     window = webview.create_window(
         title=window_title,
@@ -81,10 +87,12 @@ def main():
     def on_loaded():
         # Small delay to ensure window is fully created
         time.sleep(0.3)
+        info("Window loaded, setting title bar color")
         # Match --bg color #1a1b2e (R=0x1a, G=0x1b, B=0x2e)
         _set_title_bar_color(window_title, 0x1a, 0x1b, 0x2e)
 
     webview.start(on_loaded, debug=False)
+    info("Application exited")
 
 
 if __name__ == "__main__":

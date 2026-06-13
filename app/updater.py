@@ -10,6 +10,7 @@ import tempfile
 import subprocess
 import urllib.request
 import urllib.error
+from app.logger import debug, info, error as log_error
 
 GITHUB_REPO = "hueidou/telepresence-manager"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -94,9 +95,22 @@ def check_for_update(current_version):
                     result["download_url"] = asset.get("browser_download_url", "")
                     break
 
-    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, KeyError) as e:
+        if result["available"]:
+            info("Update available: %s -> %s (asset: %s)", current_version, latest_version, suffix)
+        else:
+            debug("No update available (current=%s, latest=%s)", current_version, latest_version)
+
+    except urllib.error.HTTPError as e:
+        log_error("Update check HTTP %d: %s", e.code, e.reason)
+        result["error"] = str(e)
+    except urllib.error.URLError as e:
+        log_error("Update check network error: %s", e.reason)
+        result["error"] = str(e)
+    except json.JSONDecodeError as e:
+        log_error("Update check JSON parse error: %s", e)
         result["error"] = str(e)
     except Exception as e:
+        log_error("Update check failed: %s", e)
         result["error"] = str(e)
 
     return result

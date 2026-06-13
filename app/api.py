@@ -3,6 +3,7 @@
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from app import kubeconfig, telepresence, updater, config
+from app.logger import debug, info, error as log_error, exception
 
 
 class Api:
@@ -15,6 +16,7 @@ class Api:
     def set_version(self, version):
         """Set the current app version (called from main)."""
         self._current_version = version
+        info("App version set to %s", version)
 
     # ── Config ──────────────────────────────────────────────────────
 
@@ -50,7 +52,7 @@ class Api:
         """Check if telepresence and kubectl are installed, return version and path info."""
         tp = telepresence.check_telepresence()
         kc = telepresence.check_kubectl()
-        return {
+        result = {
             "telepresence": tp["installed"],
             "kubectl": kc["installed"],
             "telepresence_version": tp["version"],
@@ -58,23 +60,40 @@ class Api:
             "telepresence_path": tp["path"],
             "kubectl_path": kc["path"],
         }
+        info("Tool check: telepresence=%s kubectl=%s", tp["installed"], kc["installed"])
+        return result
 
     def scan_configs(self):
         """Scan ~/.kube/ for config files and return contexts."""
         contexts = kubeconfig.scan_kube_dir()
+        info("Scanned %d contexts from ~/.kube/", len(contexts))
         return {"contexts": contexts}
 
     def connect(self, context, kubeconfig_path=None):
         """Connect telepresence to a cluster context."""
-        return telepresence.connect(context, kubeconfig_path)
+        info("Connecting to context: %s", context)
+        result = telepresence.connect(context, kubeconfig_path)
+        if result.get("success"):
+            info("Connected to %s successfully", context)
+        else:
+            log_error("Connect to %s failed: %s", context, result.get("message"))
+        return result
 
     def disconnect(self):
         """Disconnect telepresence."""
-        return telepresence.disconnect()
+        info("Disconnecting telepresence")
+        result = telepresence.disconnect()
+        if result.get("success"):
+            info("Disconnected successfully")
+        else:
+            log_error("Disconnect failed: %s", result.get("message"))
+        return result
 
     def get_status(self, context=None):
         """Get telepresence connection status."""
-        return telepresence.get_status(context)
+        result = telepresence.get_status(context)
+        debug("Status check: connected=%s", result.get("connected"))
+        return result
 
     def get_nodes(self, context, kubeconfig_path=None):
         """Get cluster nodes."""
@@ -85,33 +104,44 @@ class Api:
 
         Runs all queries in parallel for faster response.
         """
+        info("Querying full status for context: %s", context)
         with ThreadPoolExecutor(max_workers=4) as executor:
             f_tp = executor.submit(telepresence.get_status, context)
             f_nodes = executor.submit(telepresence.get_nodes, context, kubeconfig_path)
             f_cluster = executor.submit(telepresence.get_cluster_info, context, kubeconfig_path)
             f_tm = executor.submit(telepresence.check_traffic_manager, context, kubeconfig_path)
 
-            return {
+            result = {
                 "telepresence": f_tp.result(),
                 "nodes": f_nodes.result(),
                 "cluster": f_cluster.result(),
                 "traffic_manager_installed": f_tm.result()["installed"],
             }
+            debug("Full status: connected=%s, nodes=%d, TM=%s",
+                  result["telepresence"].get("connected"),
+                  result["nodes"].get("count", 0),
+                  result["traffic_manager_installed"])
+            return result
 
     def install_traffic_manager(self, context, kubeconfig_path=None):
         """Install telepresence traffic manager."""
+        info("Installing traffic manager for context: %s", context)
         return telepresence.install_traffic_manager(context, kubeconfig_path)
 
     def open_shell(self, context, kubeconfig_path=None):
-        """Open a new cmd.exe shell with the given context."""
+        """Open a new terminal window with the given context."""
+        info("Opening shell for context: %s", context)
         return telepresence.open_shell(context, kubeconfig_path)
 
     def check_update(self):
         """Check for application updates via GitHub Releases."""
         if not self._current_version:
             return {"available": False, "error": "Version not set"}
+        info("Checking for updates (current: %s)", self._current_version)
         info = updater.check_for_update(self._current_version)
         self._last_update_info = info
+        if info["available"]:
+            info("Update available: %s", info["latest_version"])
         return info
 
     def download_and_update(self):
@@ -124,14 +154,18 @@ class Api:
         if not info["available"] or not info["download_url"]:
             return {"success": False, "message": "No update available"}
 
-        # Download
+        info("Downloading update from: %s", info["download_url"])
         downloaded = updater.download_update(info["download_url"])
         if not downloaded:
+            log_error("Download failed")
             return {"success": False, "message": "Download failed"}
 
-        # Apply update (launches batch script to replace exe)
+        info("Downloaded to: %s, applying update...", downloaded)
+        # Apply update (launches batch/shell script to replace exe)
         if updater.apply_update(downloaded):
-            # Exit current process — the batch script will handle the rest
+            info("Update script launched, exiting current process")
+            # Exit current process — the update script will handle the rest
             sys.exit(0)
         else:
+            log_error("Failed to apply update")
             return {"success": False, "message": "Failed to apply update"}
