@@ -337,17 +337,22 @@ def open_shell(context, kubeconfig_path=None):
             shell_parts.append(f'set "KUBECONFIG={kubeconfig_path}"')
         else:
             shell_parts.append(f'export KUBECONFIG="{kubeconfig_path}"')
-    shell_parts.append(f"kubectl --context {context} cluster-info")
+    shell_parts.append(f'kubectl --context "{context}" cluster-info')
     shell_parts.append(f"echo Context: {context}")
     shell_parts.append("echo Type 'kubectl' to interact with the cluster.")
+
+    # Ensure the subprocess inherits the full environment with KUBECONFIG set
+    env = os.environ.copy()
+    if kubeconfig_path:
+        env["KUBECONFIG"] = kubeconfig_path
 
     try:
         if os.name == "nt":
             # ── Windows ──────────────────────────────────────
-            shell_parts.append("cmd /k")
-            inner_cmd = " & ".join(shell_parts)
+            inner_cmd = " & ".join(shell_parts) + " & cmd /k"
             subprocess.Popen(
                 ["cmd.exe", "/k", inner_cmd],
+                env=env,
                 creationflags=subprocess.CREATE_NEW_CONSOLE,
             )
 
@@ -363,6 +368,7 @@ def open_shell(context, kubeconfig_path=None):
             )
             subprocess.Popen(
                 ["osascript", "-e", script],
+                env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
@@ -383,12 +389,14 @@ def open_shell(context, kubeconfig_path=None):
             if term == "gnome-terminal":
                 subprocess.Popen(
                     ["gnome-terminal", "--", "bash", "-c", shell_cmd],
+                    env=env,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
             elif term in ("konsole", "xfce4-terminal", "lxterminal"):
                 subprocess.Popen(
                     [term, "-e", "bash", "-c", shell_cmd],
+                    env=env,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
@@ -396,6 +404,7 @@ def open_shell(context, kubeconfig_path=None):
                 # xterm fallback
                 subprocess.Popen(
                     ["xterm", "-e", "bash", "-c", shell_cmd],
+                    env=env,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
